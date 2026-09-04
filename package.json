@@ -1,0 +1,20 @@
+{
+  "name": "ai-office",
+  "version": "0.1.0",
+  "description": "A rate-limit-aware office of CLI coding agents. Roles, worktrees, memory, mail, and a permission gate that actually stops them.",
+  "type": "module",
+  "bin": { "office": "./dist/cli.js" },
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "node --experimental-strip-types src/cli.ts",
+    "test": "tsc -p tsconfig.test.json && node --test dist-test/test/*.test.js",
+    "clean": "rm -rf dist dist-test"
+  },
+  "devDependencies": {
+    "typescript": "^5.9.0",
+    "@types/node": "^22.13.0"
+  },
+  "license": "MIT",
+  "private": true
+}
