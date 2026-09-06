@@ -22,6 +22,7 @@ ${bold("Working")}
   office tasks [--all]
 
 ${bold("Watching")}
+  office serve [--port 4319] [--host 127.0.0.1]   the floor in a browser, live
   office floor            who is on what, and what is left of the budget
   office roster           the desks and what each one is allowed to touch
   office budget [--calibrate]
@@ -71,6 +72,17 @@ async function main(argv: string[]): Promise<number> {
       }, allowPositionals: true });
       const id = need(positionals[0], "office hire <agent>");
       return say(await hire(root, id, values as { title?: string; tier?: string; autonomy?: string; scope?: string[] }));
+    }
+
+    case "serve": {
+      const { values } = parseArgs({ args: rest, options: {
+        port: { type: "string", default: "4319" },
+        host: { type: "string", default: "127.0.0.1" },
+      } });
+      const { serve } = await import("./server/serve.js");
+      const { url } = await serve({ root, port: Number(values.port), host: values.host as string });
+      process.stdout.write(`${bold("the floor")} ${url}\n${dim("  Live. Approving an escalation here does what `office approve` does.")}\n${dim("  Ctrl-C to stop.")}\n`);
+      return 0;
     }
 
     case "floor": return say(await floor(await open()));

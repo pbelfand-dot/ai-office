@@ -3,8 +3,8 @@
 A floor of CLI coding agents that share one subscription, remember what they
 decided, mail each other, and stop at the line you draw.
 
-It is a headless harness, not a desktop app. There is no pixel office. What
-there is: one git worktree per agent, markdown memory that survives restarts, a
+It runs headless and gives you a live floor in the browser when you want to
+watch. One git worktree per agent, markdown memory that survives restarts, a
 file-backed mailbox, a three-stage circuit breaker, an approval gate, and a
 budget governor that knows nine agents do not get nine budgets.
 
@@ -13,7 +13,7 @@ office init --plan max5x
 office brief "Migrate the payments module off the deprecated client. Keep the
               public interface identical. Add tests for the two edge cases in
               issue 412." --run
-office floor
+office serve      # watch it happen
 ```
 
 ## The one idea
@@ -65,6 +65,34 @@ What that means concretely on Max 5x at $100/month: two concurrent agents, a
 premium orchestrator that only plans, workers on Sonnet, and documentation on
 Haiku. A third worker is not free capacity — it is the same week, spent
 one-and-a-half times faster.
+
+## The floor
+
+`office serve` opens a live view at `http://127.0.0.1:4319`. Desks arranged on a
+floor, an envelope flying between two of them when one agent mails another, and
+the budget meters across the top where you cannot miss them.
+
+It is a dashboard, not decoration. Nine terminals is an unreadable interface;
+nine desks where you can see at a glance who is blocked, who got demoted a tier,
+and how much of the week is gone is a readable one. What it shows:
+
+- **Desks.** Status by colour, the task on the monitor, the tier actually in use
+  (amber when the governor demoted it), unread mail as a badge, a red chip when
+  the circuit breaker is engaged.
+- **Budget meters.** The rolling window and the week, with the soft stop marked
+  as a tick, so you can see the demote threshold coming rather than discovering
+  it.
+- **Waiting on you.** Every open escalation, with approve and deny inline. Type
+  a reason and the agent gets it in its memory — a denial it cannot see is a
+  denial it will repeat.
+- **The agent pane.** Click a desk for its scope, branch, last memory note, and
+  a live diff of what it has actually changed, new files included.
+- **The burn strip.** One bar per turn across the bottom, red for a failed one.
+  It is the shape of the week, and it is where a looping agent looks obvious.
+
+Bound to loopback, and it refuses any request not addressed to localhost —
+approve and deny act as you, so it is not something to leave open on a network.
+No external requests, no CDN, no framework: it is one self-contained page.
 
 ## What each agent gets
 
@@ -156,6 +184,7 @@ office floor                 # who is on what, and what is left of the budget
 | `office brief "<text>" [--run]` | Split a brief into assigned tasks |
 | `office run [--max-turns N]` | Work the queue |
 | `office ask <agent> "<instruction>"` | One instruction, one agent, no planner |
+| `office serve [--port N] [--host H]` | The live floor in a browser |
 | `office floor` / `office roster` / `office tasks` | Status |
 | `office diff <agent>` | What an agent actually changed |
 | `office budget [--calibrate]` | Burn rate, and what your numbers should be |
@@ -190,21 +219,23 @@ that they stop where you told them to.
 
 The idea of wrapping CLI agents as a coordinated office, each with a desk, a
 mailbox and its own memory, is [Munder Difflin's][md] (MIT, ~6.3k stars). It is
-an Electron app with a Pixi.js floor you can watch. This is a smaller, headless
-take on the same shape, built around the budget constraint rather than around
-the visualisation. If you want to see the avatars walk, go there.
+an Electron app with a Pixi.js floor you can watch. This is a smaller take on
+the same shape, built around the budget constraint rather than around the
+visualisation, and driven from a terminal rather than a desktop app. If you want
+to see the avatars walk, go there.
 
 [md]: https://github.com/chaitanyagiri/munder-difflin
 
 ## Development
 
 ```bash
-npm test     # typechecks, then runs 79 tests
+npm test     # typechecks, then runs 93 tests
 ```
 
 The suite covers scope and destructive-command policy, the breaker's three
 stages, the ledger's demote/stop behaviour, mail delivery and dead-lettering,
-memory rollover and search ranking, plan and CLI-result parsing, and an
+memory rollover and search ranking, plan and CLI-result parsing, concurrent
+writes to shared state, the dashboard's routes and its localhost guard, and an
 end-to-end floor over a real git repo with a fake driver. `FakeDriver` lets the
 whole floor be exercised without spending a token.
 

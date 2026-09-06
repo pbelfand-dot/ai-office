@@ -90,14 +90,51 @@ export class WorktreeManager {
     }
   }
 
-  /** What the agent changed, as a diff against the branch it started from. */
-  async diff(agent: string, base?: string): Promise<string> {
+  /**
+   * What the agent changed, as a diff against the branch it started from.
+   *
+   * Untracked files are included deliberately. An agent's most common action is
+   * creating a file, and plain `git diff` shows none of them -- a review pane
+   * that says "no changes" while three new modules sit on the branch is worse
+   * than no review pane. They are rendered with --no-index rather than by
+   * staging them, because touching the index of a worktree an agent is still
+   * working in is not this method's business.
+   */
+  async diff(agent: string, base?: string, opts: { maxUntracked?: number } = {}): Promise<string> {
     const path = this.paths.worktree(agent);
     if (!(await exists(path))) return "";
     const against = base ?? (await this.defaultBranch());
-    const { stdout } = await this.git(["diff", `${against}...HEAD`], path);
+
+    const parts: string[] = [];
+    try {
+      const { stdout } = await this.git(["diff", `${against}...HEAD`], path);
+      parts.push(stdout);
+    } catch {
+      // No merge base yet (a branch cut from an unrelated root). Committed work
+      // still shows through the uncommitted diff below.
+    }
+
     const { stdout: uncommitted } = await this.git(["diff"], path);
-    return [stdout, uncommitted].filter((s) => s.trim()).join("\n");
+    parts.push(uncommitted);
+
+    for (const file of (await this.untrackedFiles(agent)).slice(0, opts.maxUntracked ?? 25)) {
+      try {
+        // --no-index exits 1 when the files differ, which is every time here.
+        await this.git(["diff", "--no-index", "--", "/dev/null", file], path);
+      } catch (err) {
+        const stdout = (err as { stdout?: string }).stdout ?? "";
+        if (stdout.trim()) parts.push(stdout);
+      }
+    }
+
+    return parts.filter((s) => s.trim()).join("\n");
+  }
+
+  async untrackedFiles(agent: string): Promise<string[]> {
+    const path = this.paths.worktree(agent);
+    if (!(await exists(path))) return [];
+    const { stdout } = await this.git(["ls-files", "--others", "--exclude-standard"], path);
+    return stdout.split("\n").map((s) => s.trim()).filter(Boolean);
   }
 
   /** Files touched since the given ref. Used to tell progress from spinning. */

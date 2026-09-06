@@ -20,6 +20,7 @@ src/
   gate/                policy (scope, destructive, spend) and the circuit breaker
   runner/driver.ts     spawns the `claude` CLI; FakeDriver for tests
   orchestrator/        prompt building, one turn, the planner, the scheduler
+  server/              `office serve`: snapshot, http + SSE, the inlined page
   commands/            one module per command group, pure string returns
 office/agents/*.md     role definitions (frontmatter + briefing)
 .office/               runtime state, gitignored
@@ -54,5 +55,13 @@ rather than mocking git.
   The agent runs `office done` from inside its own turn and needs to know which
   task it is on.
 - Memory is never auto-summarised. See the comment in `memory/store.ts`.
+- `server/page.ts` holds the dashboard as strings and its client code uses no
+  template literals — the file is itself one. Keep it that way, or `npm run
+  build` stops being a bare `tsc`.
+- `serve` reopens the `Office` per request. Roles change on disk while it runs.
+- `upsertTask` goes through a `Mutex`. Atomic writes stop a torn file, not a
+  lost update, and two agents finish in the same tick by design.
+- `worktree.diff` renders untracked files with `--no-index`. Agents mostly
+  create files; a review pane that hides them is worse than none.
 - The token budgets in `config.ts` are a governor you set, not a quota Anthropic
   publishes. Do not present them as official numbers.

@@ -31,9 +31,31 @@ export async function readJson<T>(path: string, fallback: T): Promise<T> {
  */
 export async function writeJsonAtomic(path: string, value: unknown): Promise<void> {
   await mkdir(dirname(path), { recursive: true });
-  const tmp = `${path}.${process.pid}.tmp`;
+  // The pid alone is not unique enough: two agents run concurrently inside one
+  // harness process, and a shared temp name means the second rename finds the
+  // file already gone.
+  const tmp = `${path}.${process.pid}.${randomUUID().slice(0, 8)}.tmp`;
   await writeFile(tmp, `${JSON.stringify(value, null, 2)}\n`, "utf8");
   await rename(tmp, path);
+}
+
+/**
+ * Serialises read-modify-write on one file.
+ *
+ * Atomic writes stop a torn file; they do nothing about a lost update. Two
+ * agents finishing in the same tick both read tasks.json, both edit their own
+ * row, and the second write erases the first -- a task silently reverting to
+ * "assigned" and being paid for twice. Concurrency is the point of this
+ * harness, so the shared documents need a queue.
+ */
+export class Mutex {
+  private tail: Promise<unknown> = Promise.resolve();
+
+  run<T>(fn: () => Promise<T>): Promise<T> {
+    const next = this.tail.then(fn, fn);
+    this.tail = next.catch(() => {});
+    return next;
+  }
 }
 
 export function truncate(text: string, max: number): string {

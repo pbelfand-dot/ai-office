@@ -10,7 +10,7 @@ import { Ledger } from "./budget/ledger.js";
 import { EscalationStore } from "./gate/policy.js";
 import { WorktreeManager } from "./workspace/worktree.js";
 import { ClaudeCliDriver, FakeDriver, type Driver } from "./runner/driver.js";
-import { readJson, nowIso, writeJsonAtomic } from "./util.js";
+import { readJson, nowIso, writeJsonAtomic, Mutex } from "./util.js";
 import type { AgentState, Brief, Role, Task } from "./types.js";
 
 /** Everything the floor needs, wired once and passed around. */
@@ -24,6 +24,7 @@ export class Office {
   readonly escalations: EscalationStore;
   readonly worktrees: WorktreeManager;
   readonly driver: Driver;
+  private readonly taskWrites = new Mutex();
 
   private constructor(readonly root: string, readonly config: OfficeConfig, readonly roles: Map<string, Role>, driver?: Driver) {
     this.paths = new Paths(root);
@@ -76,12 +77,15 @@ export class Office {
     await writeJsonAtomic(this.paths.tasks, tasks);
   }
 
+  /** Serialised: the scheduler calls this from several agents in the same tick. */
   async upsertTask(task: Task): Promise<void> {
-    const tasks = await this.tasks();
-    const i = tasks.findIndex((t) => t.id === task.id);
-    if (i === -1) tasks.push(task);
-    else tasks[i] = task;
-    await this.saveTasks(tasks);
+    await this.taskWrites.run(async () => {
+      const tasks = await this.tasks();
+      const i = tasks.findIndex((t) => t.id === task.id);
+      if (i === -1) tasks.push(task);
+      else tasks[i] = task;
+      await this.saveTasks(tasks);
+    });
   }
 
   async briefs(): Promise<Brief[]> {

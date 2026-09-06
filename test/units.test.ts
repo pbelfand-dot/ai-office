@@ -1,6 +1,6 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, mkdir, readFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -485,3 +485,57 @@ export async function writeRole(dir: string, id: string, frontmatter: string, bo
   await mkdir(dir, { recursive: true });
   await writeFile(join(dir, `${id}.md`), `---\n${frontmatter}\n---\n\n${body}\n`, "utf8");
 }
+
+describe("concurrent writes", () => {
+  test("two agents finishing in the same tick do not lose each other's task update", async () => {
+    const { Office } = await import("../src/office.js");
+    const { saveConfig, defaultConfig } = await import("../src/config.js");
+    const { FakeDriver } = await import("../src/runner/driver.js");
+    const { nowIso: at, shortId: sid } = await import("../src/util.js");
+
+    const root = await scratch();
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake" });
+    const office = await Office.open(root, new FakeDriver());
+
+    const make = (assignee: string) => ({
+      id: sid("task"), briefId: "b", title: assignee, instruction: "i", assignee,
+      state: "pending" as const, dependsOn: [], createdAt: at(), attempts: 0,
+    });
+    const a = make("ada");
+    const b = make("rex");
+    await office.saveTasks([a, b]);
+
+    // Both read, both edit, both write -- the shape the scheduler produces.
+    await Promise.all([
+      office.upsertTask({ ...a, state: "done", result: "a done" }),
+      office.upsertTask({ ...b, state: "done", result: "b done" }),
+    ]);
+
+    const stored = await office.tasks();
+    assert.equal(stored.length, 2);
+    assert.equal(stored.every((t) => t.state === "done"), true, "one update was lost");
+  });
+
+  test("Mutex runs work in order and survives a rejection", async () => {
+    const { Mutex } = await import("../src/util.js");
+    const mutex = new Mutex();
+    const order: number[] = [];
+
+    const results = await Promise.allSettled([
+      mutex.run(async () => { await new Promise((r) => setTimeout(r, 20)); order.push(1); }),
+      mutex.run(async () => { order.push(2); throw new Error("boom"); }),
+      mutex.run(async () => { order.push(3); }),
+    ]);
+
+    assert.deepEqual(order, [1, 2, 3]);
+    assert.equal(results[1]?.status, "rejected");
+    assert.equal(results[2]?.status, "fulfilled", "a rejection must not poison the queue");
+  });
+
+  test("atomic writes from the same process do not collide on a temp name", async () => {
+    const { writeJsonAtomic: write } = await import("../src/util.js");
+    const path = join(await scratch(), "shared.json");
+    await Promise.all(Array.from({ length: 12 }, (_, i) => write(path, { i })));
+    assert.ok(typeof JSON.parse(await readFile(path, "utf8")).i === "number");
+  });
+});

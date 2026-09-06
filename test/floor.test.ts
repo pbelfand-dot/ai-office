@@ -258,3 +258,27 @@ describe("the floor, end to end", () => {
     await assert.rejects(office.worktrees.assertRepo(), /no commits yet/);
   });
 });
+
+describe("reviewing what an agent did", () => {
+  test("the diff shows files the agent created, not just ones it edited", async () => {
+    const repo = await makeRepo();
+    await seedFloor(repo);
+    const office = await Office.open(repo, new FakeDriver(workingAgent(repo, { file: "src/brand-new.ts" })));
+    await runTurn(office, "ada", null, "add a module");
+
+    const patch = await office.worktrees.diff("ada");
+    assert.match(patch, /brand-new\.ts/, "a newly created file must appear in the review pane");
+    assert.match(patch, /\+\/\/ by ada/, "with its contents, as additions");
+  });
+
+  test("an edit to an existing tracked file still shows", async () => {
+    const repo = await makeRepo();
+    await seedFloor(repo);
+    const office = await Office.open(repo, new FakeDriver(workingAgent(repo, { file: "src/index.ts" })));
+    await runTurn(office, "ada", null, "edit the entry point");
+
+    const patch = await office.worktrees.diff("ada");
+    assert.match(patch, /src\/index\.ts/);
+    assert.match(patch, /-export const answer = 41;/);
+  });
+});
