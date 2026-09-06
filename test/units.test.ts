@@ -10,26 +10,26 @@ import { inScope, checkScope, isDestructive, needsApproval, EscalationStore } fr
 import { evaluateBreaker, applyObservation, DEFAULT_BREAKER } from "../src/gate/breaker.js";
 import { Ledger, weigh, demote } from "../src/budget/ledger.js";
 import { parsePlan } from "../src/orchestrator/planner.js";
-import { parseResult, ClaudeCliDriver, permissionModeFor } from "../src/runner/driver.js";
+import { parseClaudeResult, parseCodexStream, ClaudeDriver, CodexDriver, permissionModeFor } from "../src/runner/driver.js";
 import { parseJournal, MemoryStore } from "../src/memory/store.js";
 import { MemoryIndex } from "../src/memory/search.js";
 import { Mailbox } from "../src/mail/mailbox.js";
 import { Router } from "../src/mail/router.js";
 import { Paths } from "../src/paths.js";
-import { validateConfig, defaultConfig } from "../src/config.js";
+import { validateConfig, defaultConfig, migrateTier, type ProviderConfig } from "../src/config.js";
 import type { AgentState, LedgerEntry, Role } from "../src/types.js";
 
 const scratch = () => mkdtemp(join(tmpdir(), "office-test-"));
 
 const ROLE: Role = {
-  id: "ada", name: "Ada", title: "Implementation", tier: "sonnet", autonomy: "scoped",
+  id: "ada", provider: "claude", name: "Ada", title: "Implementation", tier: "mid", autonomy: "scoped",
   scope: ["src/", "lib/"], allowedTools: [], disallowedTools: [], briefing: "do the thing",
 };
 
 describe("frontmatter", () => {
   test("reads scalars, inline lists and block lists", () => {
     const { data, body } = parseFrontmatter([
-      "---", "name: Ada", "tier: sonnet", "allowedTools: Read, Grep, Bash",
+      "---", "name: Ada", "tier: mid", "allowedTools: Read, Grep, Bash",
       "scope:", "  - src/", "  - lib/", "---", "", "The briefing.",
     ].join("\n"));
 
@@ -55,7 +55,7 @@ describe("frontmatter", () => {
 });
 
 describe("role parsing", () => {
-  const defaults = { tier: "sonnet" as const, autonomy: "scoped" as const };
+  const defaults = { provider: "claude" as const, tier: "mid" as const, autonomy: "scoped" as const };
 
   test("rejects a scoped role with no scope, which would silently mean 'trusted'", () => {
     assert.throws(
@@ -70,6 +70,17 @@ describe("role parsing", () => {
 
   test("rejects an unknown tier", () => {
     assert.throws(() => parseRole("x", "---\ntier: gpt\nautonomy: trusted\n---\nbody", defaults), /unknown tier/);
+  });
+
+  test("still reads role files that name tiers after Anthropic's models", () => {
+    assert.equal(parseRole("x", "---\ntier: opus\nautonomy: trusted\n---\nbody", defaults).tier, "large");
+    assert.equal(parseRole("x", "---\ntier: haiku\nautonomy: trusted\n---\nbody", defaults).tier, "small");
+  });
+
+  test("a role names the provider it spends, defaulting to the office default", () => {
+    assert.equal(parseRole("x", "---\nautonomy: trusted\n---\nbody", defaults).provider, "claude");
+    assert.equal(parseRole("x", "---\nprovider: codex\nautonomy: trusted\n---\nbody", defaults).provider, "codex");
+    assert.throws(() => parseRole("x", "---\nprovider: gemini\nautonomy: trusted\n---\nbody", defaults), /unknown provider/);
   });
 });
 
@@ -158,14 +169,14 @@ describe("circuit breaker", () => {
   const progress = { output: "different every time", touchedFiles: ["src/a.ts"], mailSent: 0, turnsOnTask: 1 };
 
   test("healthy work is left alone", () => {
-    assert.equal(evaluateBreaker(base, progress, "sonnet").stage, 0);
+    assert.equal(evaluateBreaker(base, progress, "mid").stage, 0);
   });
 
   test("steers before it constrains", () => {
     let state = base;
     for (let i = 0; i < 2; i++) {
       const obs = { output: "same", touchedFiles: [], mailSent: 0, turnsOnTask: i + 1 };
-      const decision = evaluateBreaker(state, obs, "sonnet");
+      const decision = evaluateBreaker(state, obs, "mid");
       state = applyObservation(state, obs, decision);
       if (i === 1) {
         assert.equal(decision.stage, 1);
@@ -176,18 +187,18 @@ describe("circuit breaker", () => {
 
   test("constrains by dropping a tier before it stops anything", () => {
     let state = base;
-    let decision = evaluateBreaker(state, { output: "same", touchedFiles: [], mailSent: 0, turnsOnTask: 1 }, "opus");
+    let decision = evaluateBreaker(state, { output: "same", touchedFiles: [], mailSent: 0, turnsOnTask: 1 }, "large");
     for (let i = 2; i <= 3; i++) {
       const obs = { output: "same", touchedFiles: [], mailSent: 0, turnsOnTask: i };
       state = applyObservation(state, obs, decision);
-      decision = evaluateBreaker(state, obs, "opus");
+      decision = evaluateBreaker(state, obs, "large");
     }
     assert.equal(decision.stage, 2);
-    assert.equal(decision.tier, "sonnet");
+    assert.equal(decision.tier, "mid");
   });
 
   test("stops a task that will not end", () => {
-    const decision = evaluateBreaker(base, { ...progress, turnsOnTask: DEFAULT_BREAKER.maxTurnsPerTask }, "sonnet");
+    const decision = evaluateBreaker(base, { ...progress, turnsOnTask: DEFAULT_BREAKER.maxTurnsPerTask }, "mid");
     assert.equal(decision.stage, 3);
   });
 
@@ -195,21 +206,32 @@ describe("circuit breaker", () => {
     let state = base;
     for (let i = 0; i < 5; i++) {
       const obs = { output: "same", touchedFiles: [], mailSent: 1, turnsOnTask: i + 1 };
-      state = applyObservation(state, obs, evaluateBreaker(state, obs, "sonnet"));
+      state = applyObservation(state, obs, evaluateBreaker(state, obs, "mid"));
     }
     assert.equal(state.idleTurns, 0);
   });
 
   test("parking an agent is recorded on its state", () => {
-    const decision = evaluateBreaker(base, { ...progress, turnsOnTask: 99 }, "sonnet");
+    const decision = evaluateBreaker(base, { ...progress, turnsOnTask: 99 }, "mid");
     const next = applyObservation(base, progress, decision);
     assert.equal(next.status, "parked");
   });
 });
 
 describe("budget ledger", () => {
+  async function makeLedger(claude: Partial<ProviderConfig> = {}, codex: Partial<ProviderConfig> = {}): Promise<Ledger> {
+    const base = defaultConfig("max5x", "plus");
+    return new Ledger(join(await scratch(), "l.jsonl"), {
+      ...base,
+      providers: {
+        claude: { ...base.providers.claude, ...claude },
+        codex: { ...base.providers.codex, ...codex },
+      },
+    });
+  }
+
   const entry = (over: Partial<LedgerEntry> = {}): LedgerEntry => ({
-    at: new Date().toISOString(), agent: "ada", model: "sonnet", tier: "sonnet",
+    at: new Date().toISOString(), agent: "ada", provider: "claude", model: "sonnet", tier: "mid",
     costUsd: 0.1, inputTokens: 1000, outputTokens: 100, cacheReadTokens: 10_000,
     cacheCreationTokens: 0, durationMs: 100, turns: 1, ok: true, ...over,
   });
@@ -219,65 +241,76 @@ describe("budget ledger", () => {
   });
 
   test("demote walks down the tier ladder and stops at the bottom", () => {
-    assert.equal(demote("opus"), "sonnet");
-    assert.equal(demote("sonnet"), "haiku");
-    assert.equal(demote("haiku"), "haiku");
+    assert.equal(demote("large"), "mid");
+    assert.equal(demote("mid"), "small");
+    assert.equal(demote("small"), "small");
   });
 
   test("runs at full tier below the soft stop", async () => {
-    const dir = await scratch();
-    const ledger = new Ledger(join(dir, "l.jsonl"), { ...defaultConfig("max5x").budget, windowTokenBudget: 100_000, weeklyTokenBudget: 1_000_000 });
+    const ledger = await makeLedger({ windowTokenBudget: 100_000, weeklyTokenBudget: 1_000_000 });
     await ledger.record(entry());
-    const verdict = await ledger.check("opus");
+    const verdict = await ledger.check("claude", "large");
     assert.equal(verdict.allow, true);
-    assert.equal(verdict.tier, "opus");
+    assert.equal(verdict.tier, "large");
   });
 
   test("demotes rather than stopping between the soft stop and the cap", async () => {
-    const dir = await scratch();
-    const budget = { ...defaultConfig("max5x").budget, windowTokenBudget: 3000, weeklyTokenBudget: 1_000_000, softStopPct: 0.8 };
-    const ledger = new Ledger(join(dir, "l.jsonl"), budget);
+    const ledger = await makeLedger({ windowTokenBudget: 3000, weeklyTokenBudget: 1_000_000, softStopPct: 0.8 });
     await ledger.record(entry({ inputTokens: 2500, outputTokens: 0, cacheReadTokens: 0 }));
-    const verdict = await ledger.check("opus");
+    const verdict = await ledger.check("claude", "large");
     assert.equal(verdict.allow, true);
-    assert.equal(verdict.tier, "sonnet");
-    assert.match(verdict.reason, /running opus work on sonnet/);
+    assert.equal(verdict.tier, "mid");
+    assert.match(verdict.reason, /running large work on mid/);
   });
 
   test("refuses to start a turn at the cap instead of discovering the wall", async () => {
-    const dir = await scratch();
-    const ledger = new Ledger(join(dir, "l.jsonl"), { ...defaultConfig("max5x").budget, windowTokenBudget: 1000, weeklyTokenBudget: 1_000_000 });
+    const ledger = await makeLedger({ windowTokenBudget: 1000, weeklyTokenBudget: 1_000_000 });
     await ledger.record(entry({ inputTokens: 5000, outputTokens: 0, cacheReadTokens: 0 }));
-    const verdict = await ledger.check("sonnet");
+    const verdict = await ledger.check("claude", "mid");
     assert.equal(verdict.allow, false);
     assert.match(verdict.reason, /budget spent/);
   });
 
+  test("one provider's spent pool leaves the other untouched", async () => {
+    const ledger = await makeLedger({ windowTokenBudget: 1000 }, { windowTokenBudget: 1_000_000 });
+    await ledger.record(entry({ provider: "claude", inputTokens: 5000, cacheReadTokens: 0 }));
+
+    assert.equal((await ledger.check("claude", "mid")).allow, false, "claude is spent");
+    assert.equal((await ledger.check("codex", "mid")).allow, true, "codex draws on its own subscription");
+  });
+
+  test("a disabled provider refuses to run at all", async () => {
+    const ledger = await makeLedger({}, { enabled: false });
+    const verdict = await ledger.check("codex", "mid");
+    assert.equal(verdict.allow, false);
+    assert.match(verdict.reason, /disabled/);
+  });
+
+  test("rows written before providers existed are counted as claude", async () => {
+    const ledger = await makeLedger();
+    await ledger.record(entry({ provider: undefined, inputTokens: 50_000, outputTokens: 0, cacheReadTokens: 0 }));
+    assert.equal((await ledger.windowUsage("claude")).weightedTokens, 50_000);
+    assert.equal((await ledger.windowUsage("codex")).weightedTokens, 0);
+  });
+
   test("turns outside the window stop counting against it", async () => {
-    const dir = await scratch();
-    const ledger = new Ledger(join(dir, "l.jsonl"), { ...defaultConfig("max5x").budget, windowHours: 5, windowTokenBudget: 1000 });
-    const old = new Date(Date.now() - 6 * 3_600_000).toISOString();
-    await ledger.record(entry({ at: old, inputTokens: 100_000, cacheReadTokens: 0 }));
-    const verdict = await ledger.check("sonnet");
-    assert.equal(verdict.allow, true);
+    const ledger = await makeLedger({ windowHours: 5, windowTokenBudget: 1000 });
+    await ledger.record(entry({ at: new Date(Date.now() - 6 * 3_600_000).toISOString(), inputTokens: 100_000, cacheReadTokens: 0 }));
+    assert.equal((await ledger.check("claude", "mid")).allow, true);
   });
 
   test("a torn last line does not blind the governor", async () => {
-    const dir = await scratch();
-    const path = join(dir, "l.jsonl");
+    const path = join(await scratch(), "l.jsonl");
     await writeFile(path, `${JSON.stringify(entry())}\n{"at":"broken`, "utf8");
-    const ledger = new Ledger(path, defaultConfig("max5x").budget);
-    assert.equal((await ledger.entries()).length, 1);
+    assert.equal((await new Ledger(path, defaultConfig("max5x")).entries()).length, 1);
   });
 
   test("calibration reports the busiest real window, not the configured guess", async () => {
-    const dir = await scratch();
-    const budget = { ...defaultConfig("max5x").budget, windowHours: 5 };
-    const ledger = new Ledger(join(dir, "l.jsonl"), budget);
+    const ledger = await makeLedger({ windowHours: 5 });
     for (let i = 0; i < 4; i++) {
       await ledger.record(entry({ at: new Date(Date.now() - i * 60_000).toISOString(), inputTokens: 100_000, cacheReadTokens: 0, outputTokens: 0 }));
     }
-    const cal = await ledger.calibrate();
+    const cal = await ledger.calibrate("claude");
     assert.equal(cal.samples, 4);
     assert.ok(cal.peakWindow >= 400_000, `expected the four turns to land in one window, got ${cal.peakWindow}`);
   });
@@ -307,13 +340,13 @@ describe("plan parsing", () => {
   });
 });
 
-describe("cli driver", () => {
+describe("claude driver", () => {
   test("parses the CLI's json result, including usage", () => {
-    const result = parseResult(JSON.stringify({
+    const result = parseClaudeResult(JSON.stringify({
       is_error: false, result: "did it", session_id: "abc", total_cost_usd: 0.42,
       duration_ms: 1234, num_turns: 3,
       usage: { input_tokens: 10, output_tokens: 20, cache_read_input_tokens: 30, cache_creation_input_tokens: 40 },
-    }), "fallback", "sonnet", 9999);
+    }), "fallback", "mid", 9999);
 
     assert.equal(result?.ok, true);
     assert.equal(result?.sessionId, "abc");
@@ -323,24 +356,24 @@ describe("cli driver", () => {
   });
 
   test("survives a banner printed before the json", () => {
-    assert.equal(parseResult('warning: something\n{"result":"ok"}', "f", "sonnet", 1)?.text, "ok");
+    assert.equal(parseClaudeResult('warning: something\n{"result":"ok"}', "f", "mid", 1)?.text, "ok");
   });
 
   test("an error result is marked failed, not silently accepted", () => {
-    const result = parseResult('{"is_error":true,"result":"nope"}', "f", "sonnet", 1);
+    const result = parseClaudeResult('{"is_error":true,"result":"nope"}', "f", "mid", 1);
     assert.equal(result?.ok, false);
     assert.equal(result?.error, "nope");
   });
 
   test("unparseable output returns null so the caller can report the real stderr", () => {
-    assert.equal(parseResult("total nonsense", "f", "sonnet", 1), null);
-    assert.equal(parseResult("", "f", "sonnet", 1), null);
+    assert.equal(parseClaudeResult("total nonsense", "f", "mid", 1), null);
+    assert.equal(parseClaudeResult("", "f", "mid", 1), null);
   });
 
   test("resuming passes --resume, a first turn passes --session-id", () => {
-    const driver = new ClaudeCliDriver();
+    const driver = new ClaudeDriver();
     const base = {
-      agent: "ada", prompt: "p", systemPrompt: "s", cwd: "/tmp", tier: "sonnet" as const,
+      agent: "ada", prompt: "p", systemPrompt: "s", cwd: "/tmp", tier: "mid" as const,
       autonomy: "scoped" as const, allowedTools: ["Read"], disallowedTools: ["WebFetch"],
       timeoutMs: 1000, addDirs: ["/tmp/mail"],
     };
@@ -464,19 +497,48 @@ describe("mail", () => {
 });
 
 describe("config", () => {
-  test("rejects a concurrency of zero, which would stall the floor silently", () => {
+  const withClaude = (over: Partial<ProviderConfig>) => {
     const config = defaultConfig("max5x");
-    assert.throws(() => validateConfig({ ...config, budget: { ...config.budget, maxConcurrentAgents: 0 } }), /positive integer/);
+    return { ...config, providers: { ...config.providers, claude: { ...config.providers.claude, ...over } } };
+  };
+
+  test("rejects an enabled provider that allows zero concurrent agents", () => {
+    assert.throws(() => validateConfig(withClaude({ maxConcurrentAgents: 0 })), /would never run/);
   });
 
   test("the max5x preset is conservative about concurrency on purpose", () => {
-    assert.equal(defaultConfig("max5x").budget.maxConcurrentAgents, 2);
-    assert.ok(defaultConfig("max20x").budget.maxConcurrentAgents > defaultConfig("max5x").budget.maxConcurrentAgents);
+    assert.equal(defaultConfig("max5x").providers.claude.maxConcurrentAgents, 2);
+    assert.ok(defaultConfig("max20x").providers.claude.maxConcurrentAgents > defaultConfig("max5x").providers.claude.maxConcurrentAgents);
+  });
+
+  test("codex is off unless you say which ChatGPT plan you have", () => {
+    assert.equal(defaultConfig("max5x").providers.codex.enabled, false);
+    assert.equal(defaultConfig("max5x", "plus").providers.codex.enabled, true);
+    assert.equal(defaultConfig("max5x", "plus").providers.codex.maxConcurrentAgents, 2);
+  });
+
+  test("no codex model names are invented; the CLI default stands until you set one", () => {
+    assert.deepEqual(defaultConfig("max5x", "plus").providers.codex.models, {});
+    assert.equal(defaultConfig("max5x").providers.claude.models.mid, "sonnet");
   });
 
   test("rejects a soft stop outside (0,1]", () => {
-    const config = defaultConfig("pro");
-    assert.throws(() => validateConfig({ ...config, budget: { ...config.budget, softStopPct: 1.5 } }), /softStopPct/);
+    assert.throws(() => validateConfig(withClaude({ softStopPct: 1.5 })), /softStopPct/);
+  });
+
+  test("refuses a default provider that is switched off", () => {
+    const config = defaultConfig("max5x");
+    assert.throws(
+      () => validateConfig({ ...config, defaults: { ...config.defaults, provider: "codex" } }),
+      /is disabled/,
+    );
+  });
+
+  test("tier names from before the rename still resolve", () => {
+    assert.equal(migrateTier("opus"), "large");
+    assert.equal(migrateTier("sonnet"), "mid");
+    assert.equal(migrateTier("large"), "large");
+    assert.equal(migrateTier("gpt"), undefined);
   });
 });
 
@@ -537,5 +599,103 @@ describe("concurrent writes", () => {
     const path = join(await scratch(), "shared.json");
     await Promise.all(Array.from({ length: 12 }, (_, i) => write(path, { i })));
     assert.ok(typeof JSON.parse(await readFile(path, "utf8")).i === "number");
+  });
+});
+
+describe("codex driver", () => {
+  const base = {
+    agent: "rex", prompt: "review the diff", systemPrompt: "You are Rex.", cwd: "/tmp/wt",
+    tier: "mid" as const, autonomy: "scoped" as const, allowedTools: [], disallowedTools: [],
+    timeoutMs: 1000, addDirs: ["/tmp/mail"],
+  };
+
+  test("the approval flag is global, so it precedes the subcommand", () => {
+    const args = new CodexDriver().buildArgs(base);
+    assert.deepEqual(args.slice(0, 3), ["-a", "never", "exec"], "codex rejects -a after exec");
+    assert.ok(args.includes("--json"));
+    assert.ok(args.includes("--skip-git-repo-check"));
+    assert.deepEqual(args.slice(-2, -1), ["/tmp/mail"], "--add-dir value precedes the prompt");
+  });
+
+  test("resume follows exec and carries the thread id", () => {
+    const args = new CodexDriver().buildArgs({ ...base, sessionId: "thread_42" });
+    assert.deepEqual(args.slice(0, 5), ["-a", "never", "exec", "resume", "thread_42"]);
+  });
+
+  test("no model flag when the config names none, so the CLI default stands", () => {
+    assert.equal(new CodexDriver().buildArgs(base).includes("--model"), false);
+    assert.ok(new CodexDriver().buildArgs({ ...base, model: "gpt-x" }).includes("--model"));
+  });
+
+  test("the briefing rides in the prompt, since codex has no system-prompt flag", () => {
+    const prompt = new CodexDriver().buildArgs(base).at(-1) as string;
+    assert.match(prompt, /You are Rex\./);
+    assert.match(prompt, /review the diff/);
+    assert.ok(prompt.indexOf("You are Rex.") < prompt.indexOf("review the diff"), "briefing comes first");
+  });
+
+  test("never selects a sandbox that would let an agent out of its worktree", () => {
+    const args = new CodexDriver().buildArgs(base);
+    assert.equal(args[args.indexOf("--sandbox") + 1], "workspace-write");
+    assert.equal(args.includes("--yolo"), false);
+    assert.equal(args.includes("--dangerously-bypass-approvals-and-sandbox"), false);
+  });
+
+  const stream = (events: unknown[]) => events.map((e) => JSON.stringify(e)).join("\n");
+
+  test("folds the event stream into one result with usage", () => {
+    const result = parseCodexStream(stream([
+      { type: "thread.started", thread_id: "th_1" },
+      { type: "turn.started" },
+      { type: "item.completed", item: { type: "reasoning", text: "thinking" } },
+      { type: "item.completed", item: { type: "agent_message", text: "Reviewed it." } },
+      { type: "turn.completed", usage: { input_tokens: 9000, cached_input_tokens: 8400, output_tokens: 300 } },
+    ]), undefined, "gpt-x", 1234);
+
+    assert.equal(result?.ok, true);
+    assert.equal(result?.text, "Reviewed it.", "reasoning items are not output");
+    assert.equal(result?.sessionId, "th_1");
+    // cached_input_tokens is a subset of input_tokens, so it is subtracted out
+    // rather than counted twice at full weight.
+    assert.equal(result?.inputTokens, 600);
+    assert.equal(result?.cacheReadTokens, 8400);
+    assert.equal(result?.outputTokens, 300);
+    assert.equal(result?.costUsd, 0, "codex reports no cost, and inventing one would mislead the spend gate");
+  });
+
+  test("an unknown event type costs a field, not the turn", () => {
+    const result = parseCodexStream(stream([
+      { type: "thread.started", thread_id: "th_2" },
+      { type: "some.future.event", payload: { anything: true } },
+      { type: "item.completed", item: { type: "agent_message", text: "done" } },
+    ]), undefined, "gpt-x", 1);
+    assert.equal(result?.ok, true);
+    assert.equal(result?.text, "done");
+  });
+
+  test("interleaved non-json output does not lose the usage three lines later", () => {
+    const raw = [
+      "warning: something on stderr got interleaved",
+      JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "ok" } }),
+      "another stray line",
+      JSON.stringify({ type: "turn.completed", usage: { input_tokens: 100, output_tokens: 5 } }),
+    ].join("\n");
+    const result = parseCodexStream(raw, "th_3", "gpt-x", 1);
+    assert.equal(result?.outputTokens, 5);
+    assert.equal(result?.sessionId, "th_3", "the known session survives a stream with no thread.started");
+  });
+
+  test("a failed turn is marked failed rather than silently accepted", () => {
+    const result = parseCodexStream(stream([
+      { type: "thread.started", thread_id: "th_4" },
+      { type: "turn.failed", error: { message: "usage limit reached" } },
+    ]), undefined, "gpt-x", 1);
+    assert.equal(result?.ok, false);
+    assert.match(result?.error ?? "", /usage limit reached/);
+  });
+
+  test("output with no events at all returns null so the caller reports real stderr", () => {
+    assert.equal(parseCodexStream("", undefined, "gpt-x", 1), null);
+    assert.equal(parseCodexStream("command not found: codex", undefined, "gpt-x", 1), null);
   });
 });

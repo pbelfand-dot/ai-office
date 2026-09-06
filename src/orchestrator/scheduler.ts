@@ -2,7 +2,8 @@ import { readdir, rm, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { nowIso } from "../util.js";
 import type { Office } from "../office.js";
-import type { Task } from "../types.js";
+import type { Provider, Task } from "../types.js";
+import { enabledProviders } from "../config.js";
 import { runTurn, type TurnOutcome } from "./turn.js";
 
 export interface SchedulerEvent {
@@ -44,6 +45,7 @@ export class Scheduler {
     const maxAttempts = opts.maxAttemptsPerTask ?? 8;
     const emit = opts.onEvent ?? (() => {});
     const summary: RunSummary = { turns: 0, completed: [], blocked: [], failed: [], stoppedBecause: "nothing left to do" };
+    const spent = new Set<Provider>();
 
     while (summary.turns < maxTurns) {
       const delivery = await this.office.router.deliverAll(new Set(this.office.agentIds()));
@@ -62,7 +64,31 @@ export class Scheduler {
         break;
       }
 
-      const batch = runnable.slice(0, this.office.config.budget.maxConcurrentAgents);
+      // Ask each pool once, before dispatching, rather than letting every desk
+      // discover a spent budget inside its own turn. Otherwise a stopped
+      // provider still consumes slots and emits turn events for work that
+      // cannot happen -- and worse, crowds out desks whose pool is fine.
+      const blocked = new Set<Provider>();
+      for (const provider of enabledProviders(this.office.config)) {
+        const verdict = await this.office.ledger.check(provider, this.office.config.defaults.tier);
+        if (verdict.allow) continue;
+        blocked.add(provider);
+        if (!spent.has(provider)) {
+          spent.add(provider);
+          emit({ type: "budget", message: verdict.reason });
+        }
+      }
+
+      const batch = this.fillSlots(runnable, blocked);
+      if (batch.length === 0) {
+        const live = enabledProviders(this.office.config).filter((p) => !spent.has(p));
+        summary.stoppedBecause = live.length === 0
+          ? `every provider's budget is spent (${[...spent].join(", ")})`
+          : `${runnable.length} task(s) are waiting on a spent pool (${[...spent].join(", ")})`;
+        emit({ type: "budget", message: summary.stoppedBecause });
+        break;
+      }
+
       const outcomes = await Promise.all(batch.map((task) => this.runOne(task, maxAttempts, emit)));
       summary.turns += outcomes.filter((o) => o.ran).length;
 
@@ -72,15 +98,25 @@ export class Scheduler {
         if (outcome.task.state === "failed") summary.failed.push(outcome.task.id);
       }
 
-      const budgetStop = outcomes.find((o) => !o.ran && o.blockedBy?.includes("budget"));
-      if (budgetStop) {
-        summary.stoppedBecause = budgetStop.blockedBy as string;
-        emit({ type: "budget", message: summary.stoppedBecause });
-        break;
+      // A spent pool stops that provider's desks, not the floor. The whole
+      // point of a second subscription is that Claude hitting its wall leaves
+      // the Codex desks working, so only stop when nothing anywhere can run.
+      for (const outcome of outcomes) {
+        if (!outcome.ran && outcome.blockedBy?.includes("budget spent")) {
+          const provider = this.office.role(outcome.task.assignee).provider;
+          if (!spent.has(provider)) {
+            spent.add(provider);
+            emit({ type: "budget", message: outcome.blockedBy });
+          }
+        }
       }
+
       if (outcomes.every((o) => !o.ran)) {
-        summary.stoppedBecause = outcomes[0]?.blockedBy ?? "every runnable task is blocked";
-        emit({ type: "stalled", message: summary.stoppedBecause });
+        const live = enabledProviders(this.office.config).filter((p) => !spent.has(p));
+        summary.stoppedBecause = live.length === 0
+          ? `every provider's budget is spent (${[...spent].join(", ")})`
+          : outcomes[0]?.blockedBy ?? "every runnable task is blocked";
+        emit({ type: spent.size ? "budget" : "stalled", message: summary.stoppedBecause });
         break;
       }
     }
@@ -137,6 +173,28 @@ export class Scheduler {
     return { ...outcome, task, ran: true, completed: false };
   }
 
+  /**
+   * Take runnable work up to each provider's own concurrency cap.
+   *
+   * One global cap would waste the second subscription: two Claude desks would
+   * fill the batch and the Codex desks, drawing on an untouched allowance,
+   * would wait behind them for no reason.
+   */
+  private fillSlots(runnable: Task[], blocked: Set<Provider>): Task[] {
+    const used = new Map<Provider, number>();
+    const batch: Task[] = [];
+    for (const task of runnable) {
+      const provider = this.office.role(task.assignee).provider;
+      if (blocked.has(provider)) continue;
+      const cap = this.office.config.providers[provider].maxConcurrentAgents;
+      const running = used.get(provider) ?? 0;
+      if (running >= cap) continue;
+      used.set(provider, running + 1);
+      batch.push(task);
+    }
+    return batch;
+  }
+
   /** Tasks whose dependencies are met and whose assignee is free to work. */
   private async runnable(tasks: Task[]): Promise<Task[]> {
     const done = new Set(tasks.filter((t) => t.state === "done").map((t) => t.id));
@@ -148,6 +206,7 @@ export class Scheduler {
       if (!task.dependsOn.every((d) => done.has(d))) continue;
       if (busy.has(task.assignee)) continue;
       if (!this.office.roles.has(task.assignee)) continue;
+      if (!this.office.config.providers[this.office.role(task.assignee).provider].enabled) continue;
       const state = await this.office.state(task.assignee);
       if (state.status === "parked" || state.status === "blocked") continue;
       out.push(task);
@@ -161,7 +220,9 @@ export class Scheduler {
     for (const task of waiting) {
       if (!this.office.roles.has(task.assignee)) { reasons.add(`no agent named "${task.assignee}"`); continue; }
       const state = await this.office.state(task.assignee);
-      if (state.status === "parked") reasons.add(`${task.assignee} is parked by the breaker`);
+      const provider = this.office.role(task.assignee).provider;
+      if (!this.office.config.providers[provider].enabled) reasons.add(`${task.assignee} runs on ${provider}, which is disabled`);
+      else if (state.status === "parked") reasons.add(`${task.assignee} is parked by the breaker`);
       else if (state.status === "blocked") reasons.add(`${task.assignee} is waiting on an approval`);
       else if (task.dependsOn.length) reasons.add(`${task.id} waits on ${task.dependsOn.join(", ")}`);
     }

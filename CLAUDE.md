@@ -16,9 +16,9 @@ src/
   workspace/           git worktree per agent
   memory/              per-agent journal + facts, BM25 search across the floor
   mail/                file-backed outbox -> router -> inbox
-  budget/ledger.ts     the governor: usage windows, tier demotion, calibration
+  budget/ledger.ts     the governor: one pool per provider, demotion, calibration
   gate/                policy (scope, destructive, spend) and the circuit breaker
-  runner/driver.ts     spawns the `claude` CLI; FakeDriver for tests
+  runner/              driver interface, shared spawn, claude.ts, codex.ts, FakeDriver
   orchestrator/        prompt building, one turn, the planner, the scheduler
   server/              `office serve`: snapshot, http + SSE, the inlined page
   commands/            one module per command group, pure string returns
@@ -49,6 +49,21 @@ rather than mocking git.
 - `permissionModeFor` ignores autonomy and always returns `acceptEdits`. Plan
   mode would block the shell commands the office protocol needs. Containment is
   the worktree; the gate decides what leaves it.
+- Budgets are per provider and are never summed. Two agents on one provider
+  share an allowance; two on different providers do not, and that is the whole
+  reason for a second subscription.
+- `CodexDriver` puts `-a never` *before* `exec`. Codex treats approval flags as
+  global; after the subcommand they are rejected.
+- `CodexDriver` prepends the briefing to the prompt. Codex has no
+  `--append-system-prompt`, and its AGENTS.md is per-directory while several
+  agents share this repo.
+- `providers.codex.models` ships empty. No model names are guessed; the CLI
+  default stands until the operator sets them.
+- The scheduler checks each pool *before* filling slots, not inside the turn.
+  Otherwise a stopped provider still consumes slots and crowds out desks whose
+  pool is fine.
+- Tiers are `small`/`mid`/`large`, not model names. `migrateTier` still reads
+  the old Anthropic-named tiers out of existing role files.
 - `inScope` checks path traversal *before* the empty-scope case. An empty scope
   means the whole repo, never the whole filesystem.
 - `runTurn` persists `status: "working"` and `currentTaskId` before spawning.

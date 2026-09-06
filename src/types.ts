@@ -1,7 +1,21 @@
 /** Core domain types for the office. */
 
-/** Model tiers, cheapest first. The scheduler demotes along this ladder. */
-export const TIERS = ["haiku", "sonnet", "opus"] as const;
+/**
+ * Which CLI, and therefore which subscription, a desk draws on.
+ *
+ * This is the axis the whole budget is organised around. Two agents on the same
+ * provider share one allowance; two on different providers do not, and that is
+ * the only way to get more concurrency without paying for more of one plan.
+ */
+export const PROVIDERS = ["claude", "codex"] as const;
+export type Provider = (typeof PROVIDERS)[number];
+
+/**
+ * Tiers, cheapest first, as an abstraction over both providers' model names.
+ * The scheduler demotes along this ladder; office.config.json maps each rung to
+ * a real model per provider.
+ */
+export const TIERS = ["small", "mid", "large"] as const;
 export type Tier = (typeof TIERS)[number];
 
 export type AgentStatus =
@@ -16,6 +30,8 @@ export interface Role {
   id: string;
   name: string;
   title: string;
+  /** Which CLI runs this desk, and so which allowance it spends. */
+  provider: Provider;
   /** Model tier this role runs at by default. */
   tier: Tier;
   /** Glob-ish path prefixes this agent may write to. Empty = whole repo. */
@@ -85,6 +101,8 @@ export interface LedgerEntry {
   at: string;
   agent: string;
   taskId?: string;
+  /** Absent on rows written before the office knew about a second provider. */
+  provider?: Provider;
   model: string;
   tier: Tier;
   /** USD as reported by the CLI. On a subscription this is notional, not billed. */

@@ -29,8 +29,8 @@ async function makeFloor(): Promise<string> {
   await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake" });
   const roles = join(root, "office", "agents");
   await mkdir(roles, { recursive: true });
-  await writeFile(join(roles, "ada.md"), "---\nname: Ada\ntitle: Implementation\ntier: sonnet\nautonomy: scoped\nscope:\n  - src/\n---\n\nYou implement.\n", "utf8");
-  await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Review\ntier: sonnet\nautonomy: scoped\nscope:\n  - test/\n---\n\nYou review.\n", "utf8");
+  await writeFile(join(roles, "ada.md"), "---\nname: Ada\ntitle: Implementation\ntier: mid\nautonomy: scoped\nscope:\n  - src/\n---\n\nYou implement.\n", "utf8");
+  await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Review\ntier: mid\nautonomy: scoped\nscope:\n  - test/\n---\n\nYou review.\n", "utf8");
   return root;
 }
 
@@ -61,7 +61,7 @@ describe("the visual floor", () => {
     const res = await fetch(`${url}/api/floor`);
     const floor = await res.json() as Awaited<ReturnType<typeof snapshot>>;
     assert.deepEqual(floor.desks.map((d) => d.id).sort(), ["ada", "rex"]);
-    assert.equal(floor.maxConcurrent, 2);
+    assert.equal(floor.pools.find((p) => p.provider === "claude")?.maxConcurrent, 2);
     assert.equal(floor.desks[0]?.status, "idle");
     assert.deepEqual(floor.desks.find((d) => d.id === "ada")?.scope, ["src/"]);
   });
@@ -69,15 +69,16 @@ describe("the visual floor", () => {
   test("budget percentages are reported against the configured caps", async () => {
     const office = await Office.open(root, new FakeDriver());
     await office.ledger.record({
-      at: nowIso(), agent: "ada", model: "sonnet", tier: "sonnet", costUsd: 0.5,
+      at: nowIso(), agent: "ada", model: "sonnet", tier: "mid", costUsd: 0.5,
       inputTokens: 1_000_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
       durationMs: 10, turns: 1, ok: true,
     });
 
     const floor = await (await fetch(`${url}/api/floor`)).json() as Awaited<ReturnType<typeof snapshot>>;
-    assert.equal(floor.budget.window.used, 1_000_000);
-    assert.ok(floor.budget.window.pct > 0.1 && floor.budget.window.pct < 0.2, `unexpected pct ${floor.budget.window.pct}`);
-    assert.equal(floor.budget.turns, 1);
+    const claude = floor.pools.find((p) => p.provider === "claude");
+    assert.equal(claude?.window.used, 1_000_000);
+    assert.ok((claude?.window.pct ?? 0) > 0.1 && (claude?.window.pct ?? 1) < 0.2, `unexpected pct ${claude?.window.pct}`);
+    assert.equal(claude?.turns, 1);
     assert.equal(floor.burn.at(-1)?.agent, "ada");
   });
 
@@ -140,7 +141,7 @@ describe("the visual floor", () => {
 
   test("a newly hired agent appears without restarting the server", async () => {
     await writeFile(join(root, "office", "agents", "doc.md"),
-      "---\nname: Doc\ntitle: Docs\ntier: haiku\nautonomy: scoped\nscope:\n  - README.md\n---\n\nYou write docs.\n", "utf8");
+      "---\nname: Doc\ntitle: Docs\ntier: small\nautonomy: scoped\nscope:\n  - README.md\n---\n\nYou write docs.\n", "utf8");
     const floor = await (await fetch(`${url}/api/floor`)).json() as Awaited<ReturnType<typeof snapshot>>;
     assert.ok(floor.desks.some((d) => d.id === "doc"), "the roster is re-read per request");
   });

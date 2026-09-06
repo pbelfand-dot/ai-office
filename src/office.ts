@@ -9,9 +9,9 @@ import { Router } from "./mail/router.js";
 import { Ledger } from "./budget/ledger.js";
 import { EscalationStore } from "./gate/policy.js";
 import { WorktreeManager } from "./workspace/worktree.js";
-import { ClaudeCliDriver, FakeDriver, type Driver } from "./runner/driver.js";
+import { FakeDriver, driverFor, modelFor, type Driver } from "./runner/driver.js";
 import { readJson, nowIso, writeJsonAtomic, Mutex } from "./util.js";
-import type { AgentState, Brief, Role, Task } from "./types.js";
+import type { AgentState, Brief, Provider, Role, Task, Tier } from "./types.js";
 
 /** Everything the floor needs, wired once and passed around. */
 export class Office {
@@ -23,7 +23,8 @@ export class Office {
   readonly ledger: Ledger;
   readonly escalations: EscalationStore;
   readonly worktrees: WorktreeManager;
-  readonly driver: Driver;
+  private readonly drivers = new Map<Provider, Driver>();
+  private readonly forcedDriver?: Driver;
   private readonly taskWrites = new Mutex();
 
   private constructor(readonly root: string, readonly config: OfficeConfig, readonly roles: Map<string, Role>, driver?: Driver) {
@@ -32,10 +33,30 @@ export class Office {
     this.index = new MemoryIndex(this.paths, this.memory);
     this.mail = new Mailbox(this.paths);
     this.router = new Router(this.paths);
-    this.ledger = new Ledger(this.paths.ledger, config.budget);
+    this.ledger = new Ledger(this.paths.ledger, config);
     this.escalations = new EscalationStore(this.paths);
     this.worktrees = new WorktreeManager(resolve(root, config.repo), this.paths);
-    this.driver = driver ?? (config.driver === "fake" ? new FakeDriver() : new ClaudeCliDriver());
+    this.forcedDriver = driver ?? (config.driver === "fake" ? new FakeDriver() : undefined);
+  }
+
+  /**
+   * The CLI that runs a given provider's desks.
+   *
+   * A driver passed to `open` overrides every provider, which is how tests run
+   * a whole two-provider floor without either binary installed.
+   */
+  driverFor(provider: Provider): Driver {
+    if (this.forcedDriver) return this.forcedDriver;
+    let driver = this.drivers.get(provider);
+    if (!driver) {
+      driver = driverFor(this.config, provider);
+      this.drivers.set(provider, driver);
+    }
+    return driver;
+  }
+
+  modelFor(provider: Provider, tier: Tier): string | undefined {
+    return modelFor(this.config, provider, tier);
   }
 
   static async open(root = process.cwd(), driver?: Driver): Promise<Office> {

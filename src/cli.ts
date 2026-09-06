@@ -2,18 +2,18 @@
 import { parseArgs } from "node:util";
 import { Office } from "./office.js";
 import { init, hire } from "./commands/setup.js";
-import { floor, roster, budget } from "./commands/status.js";
+import { floor, roster, budget, providers } from "./commands/status.js";
 import { brief, run, ask, tasks } from "./commands/work.js";
 import { callerOf, mail, inbox, remember, recall, escalate, done, revive, diff } from "./commands/agent.js";
 import { approvals, decide } from "./commands/gate.js";
 import { bold, dim, red } from "./commands/format.js";
-import type { Plan } from "./config.js";
+import type { CodexPlan, Plan } from "./config.js";
 
 const HELP = `${bold("office")} -- a floor of CLI agents that stops where you tell it to
 
 ${bold("Setting up")}
-  office init [--plan pro|max5x|max20x|api] [--no-seed] [--force]
-  office hire <agent> [--title T] [--tier haiku|sonnet|opus] [--autonomy ask|scoped|trusted] [--scope src/ --scope test/]
+  office init [--plan pro|max5x|max20x|api] [--codex-plan none|go|plus|pro|api] [--no-seed] [--force]
+  office hire <agent> [--title T] [--provider claude|codex] [--tier small|mid|large] [--autonomy ask|scoped|trusted] [--scope src/]
 
 ${bold("Working")}
   office brief "<what you want done>" [--run] [--max-turns N]   split a brief into assigned tasks
@@ -25,6 +25,7 @@ ${bold("Watching")}
   office serve [--port 4319] [--host 127.0.0.1]   the floor in a browser, live
   office floor            who is on what, and what is left of the budget
   office roster           the desks and what each one is allowed to touch
+  office providers        the subscriptions behind the floor, and their caps
   office budget [--calibrate]
   office diff <agent>     what an agent actually changed
 
@@ -57,21 +58,24 @@ async function main(argv: string[]): Promise<number> {
     case "init": {
       const { values } = parseArgs({ args: rest, options: {
         plan: { type: "string", default: "max5x" },
+        "codex-plan": { type: "string", default: "none" },
         force: { type: "boolean", default: false },
         seed: { type: "boolean", default: true },
       }, allowPositionals: false });
       const plan = values.plan as Plan;
+      const codexPlan = values["codex-plan"] as CodexPlan;
       if (!["pro", "max5x", "max20x", "api"].includes(plan)) throw new Error(`unknown plan "${plan}"`);
-      return say(await init({ root, plan, force: values.force as boolean, seed: values.seed as boolean }));
+      if (!["none", "go", "plus", "pro", "api"].includes(codexPlan)) throw new Error(`unknown codex plan "${codexPlan}"`);
+      return say(await init({ root, plan, codexPlan, force: values.force as boolean, seed: values.seed as boolean }));
     }
 
     case "hire": {
       const { values, positionals } = parseArgs({ args: rest, options: {
         title: { type: "string" }, tier: { type: "string" }, autonomy: { type: "string" },
-        scope: { type: "string", multiple: true },
+        provider: { type: "string" }, scope: { type: "string", multiple: true },
       }, allowPositionals: true });
       const id = need(positionals[0], "office hire <agent>");
-      return say(await hire(root, id, values as { title?: string; tier?: string; autonomy?: string; scope?: string[] }));
+      return say(await hire(root, id, values as { title?: string; tier?: string; autonomy?: string; scope?: string[]; provider?: string }));
     }
 
     case "serve": {
@@ -87,6 +91,7 @@ async function main(argv: string[]): Promise<number> {
 
     case "floor": return say(await floor(await open()));
     case "roster": return say(await roster(await open()));
+    case "providers": return say(await providers(await open()));
 
     case "budget": {
       const { values } = parseArgs({ args: rest, options: { calibrate: { type: "boolean", default: false } } });

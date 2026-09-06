@@ -46,8 +46,14 @@ header {
 .live.stale .dot, .live .dot { animation: pulse 2.4s ease-in-out infinite; }
 @keyframes pulse { 50% { opacity: 0.35; } }
 
-.meters { display: flex; gap: 20px; margin-left: auto; align-items: center; }
-.meter { min-width: 190px; }
+.meters { display: flex; gap: 26px; margin-left: auto; align-items: center; }
+.pool { display: flex; flex-direction: column; gap: 5px; }
+.pool .name {
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em; font-weight: 650;
+  color: var(--muted); display: flex; gap: 7px; align-items: baseline;
+}
+.pool .name em { font-style: normal; font-weight: 400; text-transform: none; letter-spacing: 0; }
+.meter { min-width: 150px; }
 .meter .top { display: flex; justify-content: space-between; font-size: 11px; color: var(--muted); margin-bottom: 4px; }
 .meter .top b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .track { position: relative; height: 7px; border-radius: 4px; background: var(--panel-2); border: 1px solid var(--line); overflow: hidden; }
@@ -99,8 +105,10 @@ main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; 
 .who .n { font-weight: 600; font-size: 12px; }
 .who .t { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .screen {
-  margin-top: 8px; height: 26px; display: block; line-height: 24px; border-radius: 4px; background: var(--panel);
-  border: 1px solid var(--line); padding: 0 6px; display: flex; align-items: center;
+  /* Block, not flex: an ellipsis needs the overflowing box to be the text box,
+     and a flex container clips its child instead of truncating it. */
+  margin-top: 8px; height: 26px; line-height: 24px; border-radius: 4px;
+  background: var(--panel); border: 1px solid var(--line); padding: 0 6px;
   font-size: 10px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
 }
 .desk[data-status="working"] .screen { color: var(--text); border-color: color-mix(in srgb, var(--working) 45%, var(--line)); }
@@ -112,6 +120,7 @@ main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; 
 .chip.demoted { color: var(--blocked); border-color: var(--blocked); }
 .chip.breaker { color: var(--parked); border-color: var(--parked); }
 .chip.dirty { color: var(--queued); }
+.chip.provider { color: var(--text); border-color: var(--desk-edge); }
 .badge {
   position: absolute; top: -7px; right: -7px; min-width: 18px; height: 18px;
   border-radius: 9px; background: var(--accent); color: #0e1116;
@@ -176,17 +185,7 @@ const BODY = `
 <header>
   <div class="brand">ai-office <span class="plan" id="plan">--</span></div>
   <div class="live" id="live"><span class="dot"></span><span id="livetext">connecting</span></div>
-  <div class="meters">
-    <div class="meter">
-      <div class="top"><span id="wlabel">window</span><b id="wpct">0%</b></div>
-      <div class="track"><div class="fill" id="wfill"></div><div class="softstop" id="wstop"></div></div>
-    </div>
-    <div class="meter">
-      <div class="top"><span>this week</span><b id="kpct">0%</b></div>
-      <div class="track"><div class="fill" id="kfill"></div><div class="softstop" id="kstop"></div></div>
-    </div>
-    <div class="spend">notional <b id="spend">$0.00</b> &middot; <b id="turns">0</b> turns</div>
-  </div>
+  <div class="meters" id="meters"></div>
 </header>
 <main>
   <div id="floor"><svg id="wires"></svg></div>
@@ -330,8 +329,8 @@ function renderDesks() {
     s.appendChild(screen);
 
     var chips = el("div", "chips");
-    var t = el("span", "chip" + (d.effectiveTier !== d.tier ? " demoted" : ""), d.effectiveTier);
-    chips.appendChild(t);
+    chips.appendChild(el("span", "chip provider", d.provider));
+    chips.appendChild(el("span", "chip" + (d.effectiveTier !== d.tier ? " demoted" : ""), d.effectiveTier));
     if (d.breakerStage > 0) chips.appendChild(el("span", "chip breaker", "breaker " + d.breakerStage));
     if (d.dirty) chips.appendChild(el("span", "chip dirty", "uncommitted"));
     if (d.turnsToday) chips.appendChild(el("span", "chip", d.turnsToday + " turns \\u00b7 " + fmt(d.weightedToday)));
@@ -372,19 +371,49 @@ function fly(m) {
   requestAnimationFrame(step);
 }
 
+/* One meter pair per pool, side by side and never summed. Adding them would
+   suggest a shared allowance, which is exactly the thing that is not true --
+   the whole reason for a second subscription is that one wall is not the
+   other. */
+function meter(label, m, softStop) {
+  var wrap = el("div", "meter");
+  var top = el("div", "top");
+  top.appendChild(el("span", null, label));
+  top.appendChild(el("b", null, Math.round(m.pct * 100) + "%"));
+  wrap.appendChild(top);
+
+  var track = el("div", "track");
+  track.title = fmt(m.used) + " of " + fmt(m.limit) + " weighted tokens";
+  var fill = el("div", "fill" + (m.pct >= 1 ? " over" : m.pct >= softStop ? " warn" : ""));
+  fill.style.width = (Math.max(0, Math.min(1, m.pct)) * 100).toFixed(1) + "%";
+  track.appendChild(fill);
+  var stop = el("div", "softstop");
+  stop.style.left = (softStop * 100) + "%";
+  track.appendChild(stop);
+  wrap.appendChild(track);
+  return wrap;
+}
+
 function renderHeader() {
-  document.getElementById("plan").textContent = S.plan + " \\u00b7 max " + S.maxConcurrent + " at once";
-  document.getElementById("wlabel").textContent = S.windowHours + "h window";
-  document.getElementById("spend").textContent = "$" + S.budget.costUsd.toFixed(2);
-  document.getElementById("turns").textContent = String(S.budget.turns);
-  [["w", S.budget.window], ["k", S.budget.week]].forEach(function (pair) {
-    var k = pair[0], m = pair[1], p = Math.max(0, Math.min(1, m.pct));
-    var fill = document.getElementById(k + "fill");
-    fill.style.width = (p * 100).toFixed(1) + "%";
-    fill.className = "fill" + (m.pct >= 1 ? " over" : m.pct >= S.softStopPct ? " warn" : "");
-    document.getElementById(k + "pct").textContent = Math.round(m.pct * 100) + "%";
-    document.getElementById(k + "stop").style.left = (S.softStopPct * 100) + "%";
-    fill.parentNode.title = fmt(m.used) + " of " + fmt(m.limit) + " weighted tokens";
+  document.getElementById("plan").textContent = S.plan;
+
+  var host = document.getElementById("meters");
+  host.textContent = "";
+  S.pools.forEach(function (pool) {
+    var col = el("div", "pool");
+    var name = el("div", "name");
+    name.appendChild(el("span", null, pool.provider));
+    name.appendChild(el("em", null, "max " + pool.maxConcurrent +
+      " \\u00b7 " + pool.turns + " turns" +
+      (pool.costUsd > 0 ? " \\u00b7 $" + pool.costUsd.toFixed(2) : "")));
+    col.appendChild(name);
+    var row = el("div", "meter-row");
+    row.style.display = "flex";
+    row.style.gap = "14px";
+    row.appendChild(meter(pool.windowHours + "h window", pool.window, pool.softStopPct));
+    row.appendChild(meter("week", pool.week, pool.softStopPct));
+    col.appendChild(row);
+    host.appendChild(col);
   });
 }
 
@@ -452,7 +481,7 @@ function renderPanel() {
   hd.appendChild(el("span", null, d.status));
   c.appendChild(hd);
   c.appendChild(el("p", null,
-    d.title + "\\n" + d.effectiveTier + " \\u00b7 autonomy " + d.autonomy +
+    d.title + "\\n" + d.provider + " \\u00b7 " + d.effectiveTier + " \\u00b7 autonomy " + d.autonomy +
     "\\nscope: " + (d.scope.length ? d.scope.join(", ") : "the whole repo") +
     (d.branch ? "\\nbranch: " + d.branch : "")));
   host.appendChild(c);
@@ -501,10 +530,12 @@ function renderBurn() {
     var r = svg("rect", {
       x: (i * (w / pts.length)).toFixed(1), y: (h - bh).toFixed(1),
       width: bw.toFixed(1), height: bh.toFixed(1), rx: "1",
-      fill: p.ok ? "var(--accent)" : "var(--parked)", opacity: "0.75"
+      // Coloured by provider, so a fleet leaning on one subscription is obvious.
+      fill: !p.ok ? "var(--parked)" : p.provider === "codex" ? "var(--working)" : "var(--accent)",
+      opacity: "0.75"
     });
     var title = document.createElementNS(SVGNS, "title");
-    title.textContent = p.agent + " \\u00b7 " + p.tier + " \\u00b7 " + fmt(p.weighted) + " \\u00b7 " + ago(p.at);
+    title.textContent = p.agent + " \\u00b7 " + p.provider + "/" + p.tier + " \\u00b7 " + fmt(p.weighted) + " \\u00b7 " + ago(p.at);
     r.appendChild(title);
     host.appendChild(r);
   });

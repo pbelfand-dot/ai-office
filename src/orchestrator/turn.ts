@@ -33,7 +33,7 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
   }
 
   const requestedTier = state.tierOverride ?? role.tier;
-  const verdict = await office.ledger.check(requestedTier);
+  const verdict = await office.ledger.check(role.provider, requestedTier);
   if (!verdict.allow) {
     return { ran: false, blockedBy: verdict.reason, breakerStage: state.breakerStage, touchedFiles: [] };
   }
@@ -58,12 +58,13 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
       : undefined,
   });
 
-  const result = await office.driver.run({
+  const result = await office.driverFor(role.provider).run({
     agent: agentId,
     prompt: instruction,
     systemPrompt,
     cwd,
     tier: verdict.tier,
+    model: office.modelFor(role.provider, verdict.tier),
     autonomy: role.autonomy,
     sessionId: state.sessionId,
     allowedTools: role.allowedTools,
@@ -77,6 +78,7 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
     at: nowIso(),
     agent: agentId,
     taskId: task?.id,
+    provider: role.provider,
     model: result.model,
     tier: verdict.tier,
     costUsd: result.costUsd,
@@ -102,7 +104,7 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
   const decision = evaluateBreaker(state, observation, requestedTier);
   const next = applyObservation({ ...state, sessionId: result.sessionId ?? state.sessionId, currentTaskId: task?.id }, observation, decision);
 
-  const gate = needsApproval(role, { touchedFiles, costUsd: result.costUsd }, office.config.budget.escalateAboveUsdPerTask);
+  const gate = needsApproval(role, { touchedFiles, costUsd: result.costUsd }, office.config.providers[role.provider].escalateAboveUsdPerTask);
   let escalationId: string | undefined;
   if (gate.required) {
     const escalation = await office.escalations.raise({

@@ -1,13 +1,15 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Office } from "../office.js";
-import type { Escalation, Message, Task } from "../types.js";
-import { weigh } from "../budget/ledger.js";
+import type { Escalation, Message, Provider, Task } from "../types.js";
+import { weigh, providerOf } from "../budget/ledger.js";
+import { enabledProviders } from "../config.js";
 
 export interface DeskView {
   id: string;
   name: string;
   title: string;
+  provider: Provider;
   tier: string;
   effectiveTier: string;
   autonomy: string;
@@ -24,25 +26,29 @@ export interface DeskView {
   weightedToday: number;
 }
 
-export interface FloorSnapshot {
-  now: string;
-  plan: string;
+export interface PoolView {
+  provider: Provider;
   maxConcurrent: number;
   windowHours: number;
   softStopPct: number;
+  window: { used: number; limit: number; pct: number };
+  week: { used: number; limit: number; pct: number };
+  costUsd: number;
+  turns: number;
+}
+
+export interface FloorSnapshot {
+  now: string;
+  plan: string;
   desks: DeskView[];
-  budget: {
-    window: { used: number; limit: number; pct: number };
-    week: { used: number; limit: number; pct: number };
-    costUsd: number;
-    turns: number;
-  };
+  /** One per enabled provider. Separate allowances, shown separately. */
+  pools: PoolView[];
   tasks: Task[];
   escalations: Escalation[];
   /** Recent messages, so the client can fly an envelope for ones it has not seen. */
   mail: (Message & { delivered: boolean })[];
   /** One point per turn, newest last, for the burn sparkline. */
-  burn: { at: string; agent: string; tier: string; weighted: number; ok: boolean }[];
+  burn: { at: string; agent: string; provider: Provider; tier: string; weighted: number; ok: boolean }[];
 }
 
 const RECENT_MAIL_MS = 5 * 60_000;
@@ -56,13 +62,30 @@ const MAIL_PER_BOX = 30;
  * would drift the moment an agent finished a turn outside this process.
  */
 export async function snapshot(office: Office): Promise<FloorSnapshot> {
-  const [window, week, tasks, escalations, ledger] = await Promise.all([
-    office.ledger.windowUsage(),
-    office.ledger.weeklyUsage(),
+  const [tasks, escalations, ledger] = await Promise.all([
     office.tasks(),
     office.escalations.list(),
     office.ledger.entries(),
   ]);
+
+  const pools: PoolView[] = [];
+  for (const provider of enabledProviders(office.config)) {
+    const b = office.config.providers[provider];
+    const [window, week] = await Promise.all([
+      office.ledger.windowUsage(provider),
+      office.ledger.weeklyUsage(provider),
+    ]);
+    pools.push({
+      provider,
+      maxConcurrent: b.maxConcurrentAgents,
+      windowHours: b.windowHours,
+      softStopPct: b.softStopPct,
+      window: { used: window.weightedTokens, limit: b.windowTokenBudget, pct: window.weightedTokens / b.windowTokenBudget },
+      week: { used: week.weightedTokens, limit: b.weeklyTokenBudget, pct: week.weightedTokens / b.weeklyTokenBudget },
+      costUsd: week.costUsd,
+      turns: week.turns,
+    });
+  }
 
   const dayAgo = Date.now() - 24 * 3_600_000;
   const desks: DeskView[] = [];
@@ -84,6 +107,7 @@ export async function snapshot(office: Office): Promise<FloorSnapshot> {
       id,
       name: role.name,
       title: role.title,
+      provider: role.provider,
       tier: role.tier,
       effectiveTier: state.tierOverride ?? role.tier,
       autonomy: role.autonomy,
@@ -101,24 +125,15 @@ export async function snapshot(office: Office): Promise<FloorSnapshot> {
     });
   }
 
-  const b = office.config.budget;
   return {
     now: new Date().toISOString(),
     plan: office.config.plan,
-    maxConcurrent: b.maxConcurrentAgents,
-    windowHours: b.windowHours,
-    softStopPct: b.softStopPct,
     desks,
-    budget: {
-      window: { used: window.weightedTokens, limit: b.windowTokenBudget, pct: window.weightedTokens / b.windowTokenBudget },
-      week: { used: week.weightedTokens, limit: b.weeklyTokenBudget, pct: week.weightedTokens / b.weeklyTokenBudget },
-      costUsd: week.costUsd,
-      turns: week.turns,
-    },
+    pools,
     tasks,
     escalations,
     mail: await recentMail(office),
-    burn: ledger.slice(-60).map((e) => ({ at: e.at, agent: e.agent, tier: e.tier, weighted: weigh(e), ok: e.ok })),
+    burn: ledger.slice(-60).map((e) => ({ at: e.at, agent: e.agent, provider: providerOf(e), tier: e.tier, weighted: weigh(e), ok: e.ok })),
   };
 }
 

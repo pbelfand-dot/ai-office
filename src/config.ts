@@ -1,86 +1,150 @@
 import { readJson, writeJsonAtomic } from "./util.js";
-import type { Autonomy, Tier } from "./types.js";
-import { TIERS } from "./types.js";
+import type { Autonomy, Provider, Tier } from "./types.js";
+import { PROVIDERS, TIERS } from "./types.js";
 
 export type Plan = "pro" | "max5x" | "max20x" | "api";
+export type CodexPlan = "none" | "go" | "plus" | "pro" | "api";
 
-export interface BudgetConfig {
+export interface ProviderConfig {
+  /** A disabled provider is invisible to the scheduler; its desks never run. */
+  enabled: boolean;
+  /** The executable to spawn. Override if it is not on PATH under this name. */
+  bin: string;
   /**
-   * Hard cap on agents running a CLI turn at the same time.
+   * Tier to model name. Left empty means "pass no model flag and take the
+   * CLI's default", which is the honest setting for a provider whose model
+   * names you have not confirmed against your own account.
+   */
+  models: Partial<Record<Tier, string>>;
+  /**
+   * Agents from THIS provider that may run at once.
    *
-   * This is the single most important number in this file. Every agent
-   * authenticates as the same subscription, so N agents do not get N budgets --
-   * they share one, N times faster.
+   * Per provider, not global, because that is the entire point: when the Claude
+   * pool is spent, the Codex desks are not.
    */
   maxConcurrentAgents: number;
-  /** Length of the rolling window the ledger scores against, in hours. */
   windowHours: number;
   /**
-   * Your cap on tokens burned per rolling window, and per week.
-   *
-   * These are NOT Anthropic's published quotas -- Anthropic does not publish
-   * exact token numbers for subscription plans. They are your own governor.
-   * Run the office for a week, then `office budget --calibrate` to replace the
-   * guesses with what your plan actually tolerated.
+   * Your caps, not the vendor's. Neither Anthropic nor OpenAI publishes token
+   * quotas for subscription plans, and both enforce an undisclosed weekly cap
+   * on top of a rolling window. Run for a week, then `office budget
+   * --calibrate` replaces these with what your plans actually tolerated.
    */
   windowTokenBudget: number;
   weeklyTokenBudget: number;
-  /** Fraction of budget at which the scheduler starts demoting tiers. */
+  /** Fraction of budget at which this provider's turns start running a tier down. */
   softStopPct: number;
   /** A single task whose notional cost exceeds this raises an escalation. */
   escalateAboveUsdPerTask: number;
 }
 
 export interface OfficeConfig {
-  /** Path to the git repo the office works in, relative to the office root. */
   repo: string;
+  /** Kept for the record: which plan the shipped defaults were scaled from. */
   plan: Plan;
-  budget: BudgetConfig;
+  codexPlan: CodexPlan;
+  providers: Record<Provider, ProviderConfig>;
   defaults: {
+    provider: Provider;
     tier: Tier;
     autonomy: Autonomy;
-    /** Wall-clock cap on one CLI turn. There is no --max-turns in the CLI. */
+    /** Wall-clock cap on one turn. Neither CLI has a usable max-turns flag. */
     turnTimeoutMs: number;
   };
-  /** "claude" runs the real CLI. "fake" is for tests and dry runs. */
-  driver: "claude" | "fake";
-  /** Which agent receives briefs and splits them up. */
+  /** "real" spawns the CLIs. "fake" is for tests and dry runs. */
+  driver: "real" | "fake";
   orchestrator: string;
 }
 
-/**
- * Starting points, scaled off the published plan multiples (Pro 1x, Max 5x,
- * Max 20x). Treat every number here as a hypothesis to be measured, not a
- * quota to be trusted.
- */
-const PLAN_PRESETS: Record<Plan, Pick<BudgetConfig, "maxConcurrentAgents" | "windowTokenBudget" | "weeklyTokenBudget">> = {
+/** Scaled off the published plan multiples. Hypotheses, not quotas. */
+const CLAUDE_PRESETS: Record<Plan, Pick<ProviderConfig, "maxConcurrentAgents" | "windowTokenBudget" | "weeklyTokenBudget">> = {
   pro:    { maxConcurrentAgents: 1, windowTokenBudget: 1_500_000,  weeklyTokenBudget: 20_000_000 },
   max5x:  { maxConcurrentAgents: 2, windowTokenBudget: 7_500_000,  weeklyTokenBudget: 100_000_000 },
   max20x: { maxConcurrentAgents: 4, windowTokenBudget: 30_000_000, weeklyTokenBudget: 400_000_000 },
   api:    { maxConcurrentAgents: 6, windowTokenBudget: Number.MAX_SAFE_INTEGER, weeklyTokenBudget: Number.MAX_SAFE_INTEGER },
 };
 
-export function defaultConfig(plan: Plan = "max5x"): OfficeConfig {
-  const preset = PLAN_PRESETS[plan];
+const CODEX_PRESETS: Record<CodexPlan, Pick<ProviderConfig, "maxConcurrentAgents" | "windowTokenBudget" | "weeklyTokenBudget"> & { enabled: boolean }> = {
+  none: { enabled: false, maxConcurrentAgents: 0, windowTokenBudget: 1, weeklyTokenBudget: 1 },
+  go:   { enabled: true,  maxConcurrentAgents: 1, windowTokenBudget: 1_500_000, weeklyTokenBudget: 20_000_000 },
+  plus: { enabled: true,  maxConcurrentAgents: 2, windowTokenBudget: 6_000_000, weeklyTokenBudget: 80_000_000 },
+  pro:  { enabled: true,  maxConcurrentAgents: 4, windowTokenBudget: 30_000_000, weeklyTokenBudget: 400_000_000 },
+  api:  { enabled: true,  maxConcurrentAgents: 6, windowTokenBudget: Number.MAX_SAFE_INTEGER, weeklyTokenBudget: Number.MAX_SAFE_INTEGER },
+};
+
+export function defaultConfig(plan: Plan = "max5x", codexPlan: CodexPlan = "none"): OfficeConfig {
   return {
     repo: ".",
     plan,
-    budget: {
-      ...preset,
-      windowHours: 5,
-      softStopPct: 0.8,
-      escalateAboveUsdPerTask: 2,
+    codexPlan,
+    providers: {
+      claude: {
+        ...CLAUDE_PRESETS[plan],
+        enabled: true,
+        bin: "claude",
+        // Aliases the CLI resolves itself, so they survive a model release.
+        models: { small: "haiku", mid: "sonnet", large: "opus" },
+        windowHours: 5,
+        softStopPct: 0.8,
+        escalateAboveUsdPerTask: 2,
+      },
+      codex: {
+        ...CODEX_PRESETS[codexPlan],
+        bin: "codex",
+        // Left empty on purpose: Codex model names are not guessed here. Set
+        // them from `codex --help` on your own account, or leave it and take
+        // whatever default your plan gives you.
+        models: {},
+        windowHours: 5,
+        softStopPct: 0.8,
+        escalateAboveUsdPerTask: 2,
+      },
     },
-    defaults: { tier: "sonnet", autonomy: "scoped", turnTimeoutMs: 15 * 60_000 },
-    driver: "claude",
+    defaults: { provider: "claude", tier: "mid", autonomy: "scoped", turnTimeoutMs: 15 * 60_000 },
+    driver: "real",
     orchestrator: "michelle",
   };
 }
 
+/** The shape written before the office knew about a second provider. */
+interface LegacyConfig {
+  plan?: Plan;
+  driver?: string;
+  budget?: Partial<ProviderConfig> & { maxConcurrentAgents?: number };
+  defaults?: { tier?: string; autonomy?: Autonomy; turnTimeoutMs?: number };
+}
+
 export async function loadConfig(path: string, plan: Plan = "max5x"): Promise<OfficeConfig> {
-  const raw = await readJson<Partial<OfficeConfig> | null>(path, null);
+  const raw = await readJson<(Partial<OfficeConfig> & LegacyConfig) | null>(path, null);
   if (!raw) return defaultConfig(plan);
-  return validateConfig({ ...defaultConfig(raw.plan ?? plan), ...raw, budget: { ...defaultConfig(raw.plan ?? plan).budget, ...raw.budget } });
+
+  const base = defaultConfig(raw.plan ?? plan, raw.codexPlan ?? "none");
+  const providers = { ...base.providers };
+  for (const name of PROVIDERS) {
+    providers[name] = { ...base.providers[name], ...raw.providers?.[name] };
+  }
+
+  // A config written before providers existed put one budget at the top level;
+  // that budget was always Claude's, so that is where it lands.
+  if (!raw.providers && raw.budget) {
+    providers.claude = { ...providers.claude, ...raw.budget };
+  }
+
+  return validateConfig({
+    ...base,
+    ...raw,
+    providers,
+    defaults: { ...base.defaults, ...raw.defaults, tier: migrateTier(raw.defaults?.tier) ?? base.defaults.tier },
+    driver: raw.driver === "fake" ? "fake" : "real",
+  });
+}
+
+/** Tiers used to be named after Anthropic's models. Old files still say so. */
+export function migrateTier(tier: string | undefined): Tier | undefined {
+  if (!tier) return undefined;
+  const legacy: Record<string, Tier> = { haiku: "small", sonnet: "mid", opus: "large" };
+  if (legacy[tier]) return legacy[tier];
+  return TIERS.includes(tier as Tier) ? (tier as Tier) : undefined;
 }
 
 export async function saveConfig(path: string, config: OfficeConfig): Promise<void> {
@@ -88,15 +152,33 @@ export async function saveConfig(path: string, config: OfficeConfig): Promise<vo
 }
 
 export function validateConfig(config: OfficeConfig): OfficeConfig {
-  const b = config.budget;
-  if (!Number.isInteger(b.maxConcurrentAgents) || b.maxConcurrentAgents < 1) {
-    throw new Error(`budget.maxConcurrentAgents must be a positive integer, got ${b.maxConcurrentAgents}`);
+  for (const name of PROVIDERS) {
+    const p = config.providers[name];
+    if (!p) throw new Error(`providers.${name} is missing`);
+    if (!Number.isInteger(p.maxConcurrentAgents) || p.maxConcurrentAgents < 0) {
+      throw new Error(`providers.${name}.maxConcurrentAgents must be a non-negative integer, got ${p.maxConcurrentAgents}`);
+    }
+    if (p.enabled && p.maxConcurrentAgents < 1) {
+      throw new Error(`providers.${name} is enabled but allows 0 concurrent agents, so its desks would never run`);
+    }
+    if (p.windowHours <= 0) throw new Error(`providers.${name}.windowHours must be > 0`);
+    if (p.softStopPct <= 0 || p.softStopPct > 1) throw new Error(`providers.${name}.softStopPct must be in (0, 1]`);
+    if (p.windowTokenBudget <= 0 || p.weeklyTokenBudget <= 0) throw new Error(`providers.${name} token budgets must be > 0`);
+    if (!p.bin.trim()) throw new Error(`providers.${name}.bin must name an executable`);
+    for (const tier of Object.keys(p.models)) {
+      if (!TIERS.includes(tier as Tier)) throw new Error(`providers.${name}.models has unknown tier "${tier}"`);
+    }
   }
-  if (b.windowHours <= 0) throw new Error("budget.windowHours must be > 0");
-  if (b.softStopPct <= 0 || b.softStopPct > 1) throw new Error("budget.softStopPct must be in (0, 1]");
-  if (b.windowTokenBudget <= 0 || b.weeklyTokenBudget <= 0) throw new Error("token budgets must be > 0");
+
+  if (!config.providers[config.defaults.provider].enabled) {
+    throw new Error(`defaults.provider is "${config.defaults.provider}", which is disabled`);
+  }
   if (!TIERS.includes(config.defaults.tier)) throw new Error(`unknown default tier ${config.defaults.tier}`);
   if (config.defaults.turnTimeoutMs < 1000) throw new Error("defaults.turnTimeoutMs must be at least 1000");
   if (!config.orchestrator.trim()) throw new Error("orchestrator must name an agent");
   return config;
+}
+
+export function enabledProviders(config: OfficeConfig): Provider[] {
+  return PROVIDERS.filter((p) => config.providers[p].enabled);
 }

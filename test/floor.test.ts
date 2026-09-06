@@ -30,17 +30,12 @@ async function makeRepo(): Promise<string> {
 }
 
 async function seedFloor(root: string): Promise<void> {
-  await saveConfig(join(root, "office.config.json"), {
-    ...defaultConfig("max5x"),
-    driver: "fake",
-    orchestrator: "michelle",
-    budget: { ...defaultConfig("max5x").budget, maxConcurrentAgents: 2 },
-  });
+  await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x", "plus"), driver: "fake", orchestrator: "michelle" });
   const roles = join(root, "office", "agents");
   await mkdir(roles, { recursive: true });
-  await writeFile(join(roles, "michelle.md"), "---\nname: Michelle\ntitle: Head of Floor\ntier: opus\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
-  await writeFile(join(roles, "ada.md"), "---\nname: Ada\ntitle: Implementation\ntier: sonnet\nautonomy: scoped\nscope:\n  - src/\n---\n\nYou implement.\n", "utf8");
-  await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Review\ntier: sonnet\nautonomy: scoped\nscope:\n  - test/\n---\n\nYou review.\n", "utf8");
+  await writeFile(join(roles, "michelle.md"), "---\nname: Michelle\ntitle: Head of Floor\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
+  await writeFile(join(roles, "ada.md"), "---\nname: Ada\ntitle: Implementation\ntier: mid\nautonomy: scoped\nscope:\n  - src/\n---\n\nYou implement.\n", "utf8");
+  await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Review\ntier: mid\nautonomy: scoped\nscope:\n  - test/\n---\n\nYou review.\n", "utf8");
 }
 
 function task(over: Partial<Task> = {}): Task {
@@ -197,13 +192,14 @@ describe("the floor, end to end", () => {
   test("the scheduler stops rather than burning a spent budget", async () => {
     const repo = await makeRepo();
     await seedFloor(repo);
+    const base = defaultConfig("max5x");
     await saveConfig(join(repo, "office.config.json"), {
-      ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle",
-      budget: { ...defaultConfig("max5x").budget, windowTokenBudget: 1, weeklyTokenBudget: 1 },
+      ...base, driver: "fake", orchestrator: "michelle",
+      providers: { ...base.providers, claude: { ...base.providers.claude, windowTokenBudget: 1, weeklyTokenBudget: 1 } },
     });
     const office = await Office.open(repo, new FakeDriver(workingAgent(repo)));
     await office.ledger.record({
-      at: nowIso(), agent: "ada", model: "sonnet", tier: "sonnet", costUsd: 1,
+      at: nowIso(), agent: "ada", model: "sonnet", tier: "mid", costUsd: 1,
       inputTokens: 10_000, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
       durationMs: 1, turns: 1, ok: true,
     });
@@ -211,7 +207,7 @@ describe("the floor, end to end", () => {
 
     const summary = await new Scheduler(office).run({ maxTurns: 5 });
     assert.equal(summary.turns, 0, "no turn should have been spawned");
-    assert.match(summary.stoppedBecause, /budget spent/);
+    assert.match(summary.stoppedBecause, /every provider's budget is spent \(claude\)/);
   });
 
   test("mail an agent sends is delivered on the next tick and shows up in its prompt", async () => {
@@ -280,5 +276,144 @@ describe("reviewing what an agent did", () => {
     const patch = await office.worktrees.diff("ada");
     assert.match(patch, /src\/index\.ts/);
     assert.match(patch, /-export const answer = 41;/);
+  });
+});
+
+describe("two providers, two pools", () => {
+  async function twoProviderFloor(): Promise<string> {
+    const root = await makeRepo();
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x", "plus"), driver: "fake" });
+    const roles = join(root, "office", "agents");
+    await mkdir(roles, { recursive: true });
+    await writeFile(join(roles, "michelle.md"), "---\nname: Michelle\ntitle: Head of Floor\nprovider: claude\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
+    await writeFile(join(roles, "ada.md"), "---\nname: Ada\ntitle: Implementation\nprovider: claude\ntier: mid\nautonomy: scoped\nscope:\n  - src/\n---\n\nYou implement.\n", "utf8");
+    await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Review\nprovider: codex\ntier: mid\nautonomy: scoped\nscope:\n  - test/\n---\n\nYou review.\n", "utf8");
+    await writeFile(join(roles, "doc.md"), "---\nname: Doc\ntitle: Docs\nprovider: codex\ntier: small\nautonomy: scoped\nscope:\n  - docs/\n---\n\nYou write docs.\n", "utf8");
+    return root;
+  }
+
+  const spend = (root: string, provider: "claude" | "codex", tokens: number) => async () => {
+    const office = await Office.open(root, new FakeDriver());
+    await office.ledger.record({
+      at: nowIso(), agent: "x", provider, model: "m", tier: "mid", costUsd: 0,
+      inputTokens: tokens, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
+      durationMs: 1, turns: 1, ok: true,
+    });
+  };
+
+  test("a spent claude pool stops the claude desks and leaves codex running", async () => {
+    const root = await twoProviderFloor();
+    await spend(root, "claude", 500_000_000)();
+
+    const office = await Office.open(root, new FakeDriver(workingAgent(root)));
+    await office.saveTasks([
+      task({ assignee: "ada", title: "claude work" }),
+      task({ assignee: "rex", title: "codex work" }),
+    ]);
+
+    const ran: string[] = [];
+    const summary = await new Scheduler(office).run({
+      maxTurns: 6,
+      onEvent: (e) => { if (e.type === "turn" && e.agent) ran.push(e.agent); },
+    });
+
+    assert.deepEqual(ran, ["rex"], "only the desk on the untouched subscription should run");
+    assert.deepEqual(summary.completed.length, 1);
+    const stored = await office.tasks();
+    assert.equal(stored.find((t) => t.assignee === "ada")?.state, "pending", "the claude task waits, it does not fail");
+    assert.equal(stored.find((t) => t.assignee === "rex")?.state, "done");
+  });
+
+  test("concurrency caps are per provider, not shared", async () => {
+    const root = await twoProviderFloor();
+    const office = await Office.open(root, new FakeDriver(workingAgent(root)));
+    await office.saveTasks([
+      task({ assignee: "ada", title: "a" }),
+      task({ assignee: "michelle", title: "b" }),
+      task({ assignee: "rex", title: "c" }),
+      task({ assignee: "doc", title: "d" }),
+    ]);
+
+    // claude max 2 + codex max 2, so all four are eligible in one batch.
+    const batches: string[][] = [];
+    let current: string[] = [];
+    await new Scheduler(office).run({
+      maxTurns: 8,
+      onEvent: (e) => {
+        if (e.type !== "turn" || !e.agent) return;
+        current.push(e.agent);
+        if (current.length === 4) { batches.push(current); current = []; }
+      },
+    });
+
+    assert.equal(batches.length, 1, "one global cap of 2 would have split these across two batches");
+    assert.deepEqual(batches[0]?.sort(), ["ada", "doc", "michelle", "rex"]);
+  });
+
+  test("both pools spent stops the floor, and says so", async () => {
+    const root = await twoProviderFloor();
+    await spend(root, "claude", 500_000_000)();
+    await spend(root, "codex", 500_000_000)();
+
+    const office = await Office.open(root, new FakeDriver(workingAgent(root)));
+    await office.saveTasks([task({ assignee: "ada" }), task({ assignee: "rex" })]);
+
+    const summary = await new Scheduler(office).run({ maxTurns: 4 });
+    assert.equal(summary.turns, 0);
+    assert.match(summary.stoppedBecause, /every provider's budget is spent/);
+    assert.match(summary.stoppedBecause, /claude/);
+    assert.match(summary.stoppedBecause, /codex/);
+  });
+
+  test("each provider's turns are billed to its own pool", async () => {
+    const root = await twoProviderFloor();
+    const office = await Office.open(root, new FakeDriver(workingAgent(root)));
+    await office.saveTasks([task({ assignee: "ada" }), task({ assignee: "rex" })]);
+    await new Scheduler(office).run({ maxTurns: 6 });
+
+    const claude = await office.ledger.entries("claude");
+    const codex = await office.ledger.entries("codex");
+    assert.deepEqual(claude.map((e) => e.agent), ["ada"]);
+    assert.deepEqual(codex.map((e) => e.agent), ["rex"]);
+  });
+
+  test("a desk on a disabled provider is never handed work", async () => {
+    const root = await twoProviderFloor();
+    // The user cancels ChatGPT; the codex desks should idle, not fail.
+    const base = defaultConfig("max5x", "plus");
+    await saveConfig(join(root, "office.config.json"), {
+      ...base, driver: "fake",
+      providers: { ...base.providers, codex: { ...base.providers.codex, enabled: false } },
+    });
+
+    const office = await Office.open(root, new FakeDriver(workingAgent(root)));
+    await office.saveTasks([task({ assignee: "rex", title: "codex work" })]);
+
+    const summary = await new Scheduler(office).run({ maxTurns: 4 });
+    assert.equal(summary.turns, 0);
+    assert.match(summary.stoppedBecause, /codex, which is disabled/);
+  });
+
+  test("each provider gets its own driver, and a forced one overrides both", async () => {
+    const root = await twoProviderFloor();
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x", "plus"), driver: "real" });
+    const real = await Office.open(root);
+    assert.equal(real.driverFor("claude").name, "claude");
+    assert.equal(real.driverFor("codex").name, "codex");
+
+    const faked = await Office.open(root, new FakeDriver());
+    assert.equal(faked.driverFor("codex").name, "fake", "a driver passed to open overrides every provider");
+  });
+
+  test("the tier a desk asks for resolves to that provider's model name", async () => {
+    const root = await twoProviderFloor();
+    const driver = new FakeDriver(workingAgent(root, { declareDone: false }));
+    const office = await Office.open(root, driver);
+
+    await runTurn(office, "ada", null, "go");
+    assert.equal(driver.calls.at(-1)?.model, "sonnet", "claude tier mid maps to the sonnet alias");
+
+    await runTurn(office, "rex", null, "go");
+    assert.equal(driver.calls.at(-1)?.model, undefined, "codex names no models, so the CLI default stands");
   });
 });

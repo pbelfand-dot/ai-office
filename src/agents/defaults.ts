@@ -1,15 +1,23 @@
+import type { Provider } from "../types.js";
+
 /**
  * A starting floor of four.
  *
- * Four desks, not nine. On a shared subscription the constraint is the budget,
- * not the number of chairs, and a fifth agent mostly adds another context to
- * pay for. Add desks when a queue forms, not before.
+ * Four desks, not nine. On one subscription the constraint is the budget, not
+ * the number of chairs, and a fifth agent mostly adds another context to pay
+ * for. Add desks when a queue forms, not before.
+ *
+ * When a second provider is available, review and documentation move to it.
+ * That is not load balancing: a reviewer running on a different model than the
+ * implementer catches things a second pass by the same model does not, and
+ * documentation is the cheapest work on the floor, so it belongs on whichever
+ * allowance you are least worried about spending.
  */
-export const DEFAULT_ROLES: Record<string, string> = {
+const ROLES: Record<string, string> = {
   michelle: `---
 name: Michelle
 title: Head of Floor
-tier: opus
+tier: large
 autonomy: trusted
 scope:
   - office/
@@ -46,7 +54,7 @@ for the two edge cases in issue 412" is.
   ada: `---
 name: Ada
 title: Implementation
-tier: sonnet
+tier: mid
 autonomy: scoped
 scope:
   - src/
@@ -79,7 +87,7 @@ message.
   rex: `---
 name: Rex
 title: Review and Tests
-tier: sonnet
+tier: mid
 autonomy: scoped
 scope:
   - test/
@@ -110,7 +118,7 @@ Michelle if it changes the plan.
   doc: `---
 name: Doc
 title: Documentation
-tier: haiku
+tier: small
 autonomy: scoped
 scope:
   - README.md
@@ -135,3 +143,15 @@ common documentation defect in a fast-moving repo is not missing text, it is
 text that used to be true.
 `,
 };
+
+/** Which desks move to the second provider when there is one. */
+const SECOND_PROVIDER_ROLES = new Set(["rex", "doc"]);
+
+export function defaultRoles(second?: Provider): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [id, source] of Object.entries(ROLES)) {
+    const provider = second && SECOND_PROVIDER_ROLES.has(id) ? second : "claude";
+    out[id] = source.replace(/^---\n/, `---\nprovider: ${provider}\n`);
+  }
+  return out;
+}

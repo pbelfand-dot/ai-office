@@ -1,8 +1,8 @@
 import { appendFile, readFile, mkdir } from "node:fs/promises";
 import { dirname } from "node:path";
-import type { LedgerEntry, Tier } from "../types.js";
-import { TIERS } from "../types.js";
-import type { BudgetConfig } from "../config.js";
+import type { LedgerEntry, Provider, Tier } from "../types.js";
+import { PROVIDERS, TIERS } from "../types.js";
+import type { OfficeConfig, ProviderConfig } from "../config.js";
 
 export interface Usage {
   weightedTokens: number;
@@ -13,7 +13,7 @@ export interface Usage {
 
 export interface Verdict {
   allow: boolean;
-  /** The tier the agent may actually run at, after demotion. */
+  /** The tier this provider may actually run at, after demotion. */
   tier: Tier;
   reason: string;
   windowPct: number;
@@ -21,9 +21,9 @@ export interface Verdict {
 }
 
 /**
- * Cache reads are roughly a tenth the price of fresh input, so counting them
- * one-for-one would make a well-cached agent look twice as expensive as it is
- * and throttle exactly the behaviour you want to encourage.
+ * Cache reads are roughly a tenth the price of fresh input on both providers,
+ * so counting them one-for-one would make a well-cached agent look twice as
+ * expensive as it is and throttle exactly the behaviour you want.
  */
 const CACHE_READ_WEIGHT = 0.1;
 
@@ -36,19 +36,27 @@ export function weigh(entry: Pick<LedgerEntry, "inputTokens" | "outputTokens" | 
   );
 }
 
+/** Rows written before the second provider existed were all Claude's. */
+export const providerOf = (entry: LedgerEntry): Provider => entry.provider ?? "claude";
+
 /**
- * The governor.
+ * The governor, one pool per provider.
  *
- * Every agent on the floor authenticates as the same subscription, so the
- * floor has one budget, not one per desk. Adding agents does not add capacity;
- * it spends the same capacity faster and in parallel. This class is the only
- * thing standing between "nine agents" and "nine agents that all stop at
- * 11am on a Tuesday".
+ * Every agent on a provider signs in as the same subscription, so that
+ * provider has one budget however many desks draw on it. Agents on a
+ * *different* provider draw on a different one, and that is the only way to add
+ * concurrency without buying more of a single plan. So a spent Claude window
+ * stops the Claude desks and leaves the Codex desks running -- which is the
+ * whole reason the pools are separate rather than summed.
  */
 export class Ledger {
   private cache: LedgerEntry[] | null = null;
 
-  constructor(private readonly path: string, private readonly budget: BudgetConfig) {}
+  constructor(private readonly path: string, private readonly config: OfficeConfig) {}
+
+  budgetFor(provider: Provider): ProviderConfig {
+    return this.config.providers[provider];
+  }
 
   async record(entry: LedgerEntry): Promise<void> {
     await mkdir(dirname(this.path), { recursive: true });
@@ -56,13 +64,17 @@ export class Ledger {
     if (this.cache) this.cache.push(entry);
   }
 
-  async entries(): Promise<LedgerEntry[]> {
-    if (this.cache) return this.cache;
+  async entries(provider?: Provider): Promise<LedgerEntry[]> {
+    if (!this.cache) this.cache = await this.read();
+    return provider ? this.cache.filter((e) => providerOf(e) === provider) : this.cache;
+  }
+
+  private async read(): Promise<LedgerEntry[]> {
     let raw: string;
     try {
       raw = await readFile(this.path, "utf8");
     } catch (err) {
-      if ((err as NodeJS.ErrnoException).code === "ENOENT") return (this.cache = []);
+      if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
       throw err;
     }
     const out: LedgerEntry[] = [];
@@ -74,12 +86,12 @@ export class Ledger {
         // A torn final line after a hard kill should not blind the governor.
       }
     }
-    return (this.cache = out);
+    return out;
   }
 
-  async usageSince(sinceMs: number, now = Date.now()): Promise<Usage> {
+  async usageSince(provider: Provider, sinceMs: number, now = Date.now()): Promise<Usage> {
     const cutoff = now - sinceMs;
-    const rows = (await this.entries()).filter((e) => Date.parse(e.at) >= cutoff);
+    const rows = (await this.entries(provider)).filter((e) => Date.parse(e.at) >= cutoff);
     return {
       weightedTokens: rows.reduce((sum, e) => sum + weigh(e), 0),
       costUsd: rows.reduce((sum, e) => sum + e.costUsd, 0),
@@ -88,61 +100,69 @@ export class Ledger {
     };
   }
 
-  windowUsage(now = Date.now()): Promise<Usage> {
-    return this.usageSince(this.budget.windowHours * 3_600_000, now);
+  windowUsage(provider: Provider, now = Date.now()): Promise<Usage> {
+    return this.usageSince(provider, this.budgetFor(provider).windowHours * 3_600_000, now);
   }
 
-  weeklyUsage(now = Date.now()): Promise<Usage> {
-    return this.usageSince(7 * 24 * 3_600_000, now);
+  weeklyUsage(provider: Provider, now = Date.now()): Promise<Usage> {
+    return this.usageSince(provider, 7 * 24 * 3_600_000, now);
   }
 
   /**
-   * Decide whether a turn may run, and at what tier.
+   * Decide whether a turn on this provider may run, and at what tier.
    *
-   * Below the soft stop everything runs as asked. Between the soft stop and
-   * the cap, work continues but drops a tier -- a demoted agent that finishes
-   * beats a premium agent that gets cut off mid-refactor. At the cap, nothing
+   * Below the soft stop everything runs as asked. Between the soft stop and the
+   * cap, work continues but drops a tier -- a demoted agent that finishes beats
+   * a premium agent cut off mid-refactor. At the cap, nothing on that provider
    * starts, because the alternative is discovering the wall by hitting it.
    */
-  async check(requested: Tier, now = Date.now()): Promise<Verdict> {
-    const [window, week] = await Promise.all([this.windowUsage(now), this.weeklyUsage(now)]);
-    const windowPct = window.weightedTokens / this.budget.windowTokenBudget;
-    const weeklyPct = week.weightedTokens / this.budget.weeklyTokenBudget;
+  async check(provider: Provider, requested: Tier, now = Date.now()): Promise<Verdict> {
+    const budget = this.budgetFor(provider);
+    if (!budget.enabled) {
+      return { allow: false, tier: requested, reason: `the ${provider} provider is disabled in office.config.json`, windowPct: 0, weeklyPct: 0 };
+    }
+
+    const [window, week] = await Promise.all([this.windowUsage(provider, now), this.weeklyUsage(provider, now)]);
+    const windowPct = window.weightedTokens / budget.windowTokenBudget;
+    const weeklyPct = week.weightedTokens / budget.weeklyTokenBudget;
     const worst = Math.max(windowPct, weeklyPct);
 
     if (worst >= 1) {
-      const which = windowPct >= weeklyPct ? `${this.budget.windowHours}h window` : "week";
-      return { allow: false, tier: requested, reason: `budget spent for this ${which} (${pct(worst)})`, windowPct, weeklyPct };
+      const which = windowPct >= weeklyPct ? `${budget.windowHours}h window` : "week";
+      return { allow: false, tier: requested, reason: `${provider} budget spent for this ${which} (${pct(worst)})`, windowPct, weeklyPct };
     }
 
-    if (worst >= this.budget.softStopPct) {
+    if (worst >= budget.softStopPct) {
       const demoted = demote(requested);
       return {
         allow: true,
         tier: demoted,
         reason: demoted === requested
-          ? `at ${pct(worst)} of budget, already on the cheapest tier`
-          : `at ${pct(worst)} of budget, running ${requested} work on ${demoted}`,
+          ? `${provider} at ${pct(worst)} of budget, already on the cheapest tier`
+          : `${provider} at ${pct(worst)} of budget, running ${requested} work on ${demoted}`,
         windowPct,
         weeklyPct,
       };
     }
 
-    return { allow: true, tier: requested, reason: `${pct(worst)} of budget used`, windowPct, weeklyPct };
+    return { allow: true, tier: requested, reason: `${provider} at ${pct(worst)} of budget`, windowPct, weeklyPct };
   }
 
   /**
    * Turn a week of observation into budget numbers you can defend.
    *
-   * The shipped defaults are extrapolations from the published plan multiples,
-   * not quotas Anthropic publishes. After a week of real turns, the busiest
+   * The shipped defaults are extrapolations from published plan multiples, not
+   * quotas either vendor publishes. After a week of real turns, the busiest
    * window you actually completed is a far better cap than any guess.
    */
-  async calibrate(now = Date.now()): Promise<{ suggestedWindow: number; suggestedWeekly: number; samples: number; peakWindow: number }> {
-    const rows = await this.entries();
-    if (rows.length === 0) return { suggestedWindow: this.budget.windowTokenBudget, suggestedWeekly: this.budget.weeklyTokenBudget, samples: 0, peakWindow: 0 };
+  async calibrate(provider: Provider, now = Date.now()): Promise<{ provider: Provider; suggestedWindow: number; suggestedWeekly: number; samples: number; peakWindow: number }> {
+    const budget = this.budgetFor(provider);
+    const rows = await this.entries(provider);
+    if (rows.length === 0) {
+      return { provider, suggestedWindow: budget.windowTokenBudget, suggestedWeekly: budget.weeklyTokenBudget, samples: 0, peakWindow: 0 };
+    }
 
-    const windowMs = this.budget.windowHours * 3_600_000;
+    const windowMs = budget.windowHours * 3_600_000;
     const sorted = [...rows].sort((a, b) => Date.parse(a.at) - Date.parse(b.at));
     let peak = 0;
     let start = 0;
@@ -156,14 +176,19 @@ export class Ledger {
       peak = Math.max(peak, running);
     }
 
-    const week = await this.weeklyUsage(now);
+    const week = await this.weeklyUsage(provider, now);
     return {
-      // 15% of headroom over the busiest window you survived, rounded to something legible.
-      suggestedWindow: Math.round((peak * 1.15) / 100_000) * 100_000 || this.budget.windowTokenBudget,
-      suggestedWeekly: Math.round((week.weightedTokens * 1.15) / 1_000_000) * 1_000_000 || this.budget.weeklyTokenBudget,
+      provider,
+      // 15% of headroom over the busiest window you survived.
+      suggestedWindow: Math.round((peak * 1.15) / 100_000) * 100_000 || budget.windowTokenBudget,
+      suggestedWeekly: Math.round((week.weightedTokens * 1.15) / 1_000_000) * 1_000_000 || budget.weeklyTokenBudget,
       samples: rows.length,
       peakWindow: peak,
     };
+  }
+
+  calibrateAll(now = Date.now()) {
+    return Promise.all(PROVIDERS.map((p) => this.calibrate(p, now)));
   }
 }
 

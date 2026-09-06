@@ -1,13 +1,14 @@
 import { mkdir, writeFile, access } from "node:fs/promises";
 import { join } from "node:path";
 import { Paths } from "../paths.js";
-import { defaultConfig, saveConfig, type Plan } from "../config.js";
-import { DEFAULT_ROLES } from "../agents/defaults.js";
+import { defaultConfig, saveConfig, type CodexPlan, type Plan } from "../config.js";
+import { defaultRoles } from "../agents/defaults.js";
 import { bold, dim, green, yellow } from "./format.js";
 
 export interface InitOptions {
   root: string;
   plan: Plan;
+  codexPlan: CodexPlan;
   force: boolean;
   seed: boolean;
 }
@@ -20,38 +21,49 @@ export async function init(opts: InitOptions): Promise<string> {
     throw new Error(`${paths.config} already exists. Pass --force to overwrite it.`);
   }
 
-  const config = defaultConfig(opts.plan);
+  const config = defaultConfig(opts.plan, opts.codexPlan);
   await saveConfig(paths.config, config);
   await paths.ensureOffice();
   await mkdir(paths.rolesDir, { recursive: true });
-  lines.push(`${green("created")} office.config.json ${dim(`(plan ${opts.plan})`)}`);
+  lines.push(`${green("created")} office.config.json ${dim(`(claude ${opts.plan}${opts.codexPlan === "none" ? "" : `, codex ${opts.codexPlan}`})`)}`);
 
   if (opts.seed) {
-    for (const [id, source] of Object.entries(DEFAULT_ROLES)) {
+    const roles = defaultRoles(config.providers.codex.enabled ? "codex" : undefined);
+    for (const [id, source] of Object.entries(roles)) {
       const path = join(paths.rolesDir, `${id}.md`);
       if (!opts.force && (await exists(path))) {
         lines.push(`${dim("kept")}    office/agents/${id}.md`);
         continue;
       }
       await writeFile(path, source, "utf8");
-      lines.push(`${green("hired")}   ${id}`);
+      const on = /provider:\s*(\w+)/.exec(source)?.[1] ?? "claude";
+      lines.push(`${green("hired")}   ${id} ${dim(`on ${on}`)}`);
     }
   }
 
   lines.push("");
   lines.push(bold("The number that matters"));
+  const claude = config.providers.claude;
+  const codex = config.providers.codex;
   lines.push(
-    `  Concurrency is capped at ${bold(String(config.budget.maxConcurrentAgents))} for the ${opts.plan} plan. Every agent signs in as\n` +
-    `  the same subscription, so more desks do not buy more capacity -- they spend\n` +
-    `  the same capacity faster. Raise it in office.config.json once you have a week\n` +
-    `  of ledger data and ${dim("office budget --calibrate")} tells you there is room.`,
+    `  Concurrency is capped per provider: ${bold(String(claude.maxConcurrentAgents))} on claude` +
+    (codex.enabled ? `, ${bold(String(codex.maxConcurrentAgents))} on codex` : "") + `.\n` +
+    `  Every agent on a provider signs in as the same subscription, so more desks on\n` +
+    `  one provider do not buy more capacity -- they spend the same capacity faster.\n` +
+    `  Desks on a different provider draw on a different allowance, which is the only\n` +
+    `  way to add concurrency without buying more of one plan.`,
   );
+  if (!codex.enabled) {
+    lines.push("");
+    lines.push(dim("  Already paying for ChatGPT? `office init --codex-plan plus` turns on a"));
+    lines.push(dim("  second pool you are not currently using."));
+  }
   lines.push("");
   lines.push(`${yellow("Next")}: ${dim("office roster")}, then ${dim('office brief "<what you want done>"')}`);
   return lines.join("\n");
 }
 
-export async function hire(root: string, id: string, opts: { title?: string; tier?: string; autonomy?: string; scope?: string[] }): Promise<string> {
+export async function hire(root: string, id: string, opts: { title?: string; tier?: string; autonomy?: string; scope?: string[]; provider?: string }): Promise<string> {
   const paths = new Paths(root);
   const path = join(paths.rolesDir, `${id}.md`);
   if (await exists(path)) throw new Error(`${id} already has a desk at office/agents/${id}.md`);
@@ -62,7 +74,8 @@ export async function hire(root: string, id: string, opts: { title?: string; tie
     "---",
     `name: ${id.charAt(0).toUpperCase()}${id.slice(1)}`,
     `title: ${opts.title ?? "Staff"}`,
-    `tier: ${opts.tier ?? "sonnet"}`,
+    `provider: ${opts.provider ?? "claude"}`,
+    `tier: ${opts.tier ?? "mid"}`,
     `autonomy: ${autonomy}`,
     "scope:",
     ...scope.map((s) => `  - ${s}`),
