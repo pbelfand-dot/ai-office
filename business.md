@@ -23,7 +23,10 @@ the calendar is work that waits.
   it on Vercel; one more photo to upload. Until the URL exists, nothing we send
   may link to a portfolio — send sample images directly instead, and June owns
   getting the site up as the thing that unblocks Marco.
-- Booking contact, the one actually answered: **BLANK**
+- Booking contact: **kept in the local copy only** — this file is in a public
+  repository, and a personal phone number does not belong in one. The real
+  number and email are in `business.md` in Paul's own workspace, which is
+  where the desks read from anyway.
 
 ## Who does what
 
@@ -101,7 +104,9 @@ can actually sit down and edit, not from what sounds competitive.
 - Turnaround Paul promises: **BLANK — Kaya to propose one Paul can always hit,
   based on the hours below, then Paul confirms it.** Until then, no desk states
   a delivery time to a client.
-- Photo count included, house-size limit: **BLANK**
+- **Photo count: 10 to 20 delivered images per shoot.** House-size limit not
+  set — a large house still has to fit that count, so Victor should price
+  above a certain size separately rather than absorbing it.
 
 ## Who the clients are
 
@@ -171,6 +176,19 @@ Two things follow from that window and every desk should act on them:
   the shoot window and the edit window compete for the same evening. Any
   turnaround promise is built from this, not from what competitors advertise.
 
-- Gear owned: **BLANK**
+**Gear owned.** Sony a6700 body, an 11mm lens (the one normally on the camera)
+and a 15mm, plus a flash and a tripod. Nothing rented, no drone.
+
+What that means in practice, so no desk promises something the kit cannot do:
+
+- The a6700 is an APS-C camera, so the 11mm frames roughly like a 16-17mm lens
+  on full frame. That is properly wide — small bedrooms and bathrooms are
+  coverable, which is where most listing photography actually fails.
+- Tripod plus flash is the whole interiors toolkit: it allows the bracketed or
+  flash-blended approach that keeps windows from blowing out while the room
+  stays true to colour. This is a real quality advantage over an agent's phone
+  and worth saying out loud in outreach.
+- **No drone and no aerial.** Do not offer it, do not price it, do not imply it.
+- No second body. A failure on the day means a cancelled shoot, not a fallback.
 - Money available to spend right now: **BLANK**
 - Already tried, did not work: **BLANK**
