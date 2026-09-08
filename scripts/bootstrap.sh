@@ -42,6 +42,13 @@ fi
 [ -n "$CLAUDE_BIN" ] || die "the claude CLI installed but is still not on PATH. Open a new terminal and run this again."
 printf '    claude %s\n' "$CLAUDE_BIN"
 
+# Checked here rather than discovered two minutes later by four desks failing
+# one after another with an auth error nobody reads as "you are logged out".
+if ! "$CLAUDE_BIN" auth status 2>/dev/null | grep -q '"loggedIn": *true'; then
+  die "the claude CLI is not signed in. Run:  claude auth login   then run this again."
+fi
+printf '    signed in\n'
+
 # ---------------------------------------------------------------------- source
 if [ -d "$SRC/.git" ]; then
   say "Updating $SRC"
