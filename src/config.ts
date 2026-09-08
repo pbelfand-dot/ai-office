@@ -56,6 +56,11 @@ export interface OfficeConfig {
   orchestrator: string;
   /** The hidden desk that decides who a chat message is for. */
   router: string;
+  /**
+   * A file at the repo root every desk reads before answering, copied into each
+   * worktree so it counts even before you commit it. Empty means none.
+   */
+  brief?: string;
   chat: ChatConfig;
 }
 
@@ -137,7 +142,8 @@ export function defaultConfig(plan: Plan = "max5x", codexPlan: CodexPlan = "none
     driver: "real",
     orchestrator: "michelle",
     router: "switchboard",
-    chat: { channel: "floor", maxTier: "mid", routerTier: "small", turnTimeoutMs: 3 * 60_000, historyDepth: 24, autoRun: 6 },
+    brief: "",
+    chat: { channel: "floor", maxTier: "mid", routerTier: "small", turnTimeoutMs: 3 * 60_000, historyDepth: 14, autoRun: 3 },
   };
 }
 

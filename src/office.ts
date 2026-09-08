@@ -11,6 +11,8 @@ import { Ledger } from "./budget/ledger.js";
 import { EscalationStore } from "./gate/policy.js";
 import { WorktreeManager } from "./workspace/worktree.js";
 import { FakeDriver, driverFor, modelFor, type Driver } from "./runner/driver.js";
+import { readFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 import { readJson, nowIso, writeJsonAtomic, Mutex } from "./util.js";
 import type { AgentState, Brief, Provider, Role, Task, Tier } from "./types.js";
 
@@ -115,6 +117,30 @@ export class Office {
       else tasks[i] = task;
       await this.saveTasks(tasks);
     });
+  }
+
+  /**
+   * Put the floor's shared context where the desks can actually read it.
+   *
+   * Every desk works in a git worktree checked out from HEAD, so a file you
+   * have written but not committed does not exist as far as they are
+   * concerned -- and business.md is exactly the file you edit constantly and
+   * commit rarely. The desks then ask you for what you already told them.
+   * Copied rather than committed on your behalf: what goes in your history is
+   * your decision, not a side effect of asking a question.
+   */
+  async syncBrief(worktree: string): Promise<void> {
+    const name = this.config.brief;
+    if (!name) return;
+    try {
+      const source = await readFile(resolve(this.root, this.config.repo, name), "utf8");
+      const target = join(worktree, name);
+      if (await readFile(target, "utf8").catch(() => null) === source) return;
+      await writeFile(target, source, "utf8");
+    } catch {
+      // No brief written yet, or unreadable. The desks will say which blank
+      // stopped them, which is the same outcome and a better message.
+    }
   }
 
   async briefs(): Promise<Brief[]> {

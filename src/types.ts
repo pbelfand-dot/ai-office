@@ -172,6 +172,12 @@ export interface AgentState {
   /** Claude Code session id, so the agent keeps one continuous thread. */
   sessionId?: string;
   /**
+   * The task `sessionId` belongs to. A thread is continuous within a task and
+   * starts fresh for the next one: resumed forever, a session's context grows
+   * forever and is re-read, at cache price, by every turn after it.
+   */
+  sessionTaskId?: string;
+  /**
    * The agent's *conversation* thread, kept apart from its work thread. An
    * afternoon of chat should not be the context a task starts from, and a
    * half-finished refactor should not be what it remembers in the channel.

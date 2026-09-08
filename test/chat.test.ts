@@ -111,8 +111,14 @@ describe("the channel", () => {
     // the allowance the building is for.
     assert.equal(call?.tier, "mid");
 
+    // Chat keeps no session. The transcript is the memory, and it is bounded;
+    // a resumed session is not, and re-reading it every turn was where the
+    // money went -- a measured floor spent most of its bill on cache reads of
+    // a context nobody had pruned.
+    assert.equal(call?.sessionId, undefined, "no thread to resume, so nothing accumulates");
+
     const state = await office.state("ada");
-    assert.equal(state.chatSessionId, "fake-session-ada");
+    assert.equal(state.chatSessionId, undefined);
     assert.equal(state.sessionId, undefined, "the work thread is untouched by chat");
   });
 

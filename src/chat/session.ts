@@ -206,7 +206,9 @@ async function replyFrom(office: Office, agentId: string, channel: string, promp
   try {
     outcome = await runTurn(office, agentId, null, replyPrompt(office, history, opts.mayPass ?? false), {
       thread: "chat",
-      maxTier: office.config.chat.maxTier,
+      // Deciding whether you have anything to add is a cheaper judgement than
+      // having something to add, and most volunteers pass.
+      maxTier: opts.mayPass ? office.config.chat.routerTier : office.config.chat.maxTier,
       // Read-only by construction on Claude. Codex takes no tool flags, so
       // there the worktree and the gate are what stop a chat turn editing.
       allowedTools: READ_ONLY_TOOLS,

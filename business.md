@@ -4,104 +4,126 @@ Every desk reads this before answering. Anything marked **BLANK** is something
 only Paul can answer — if it blocks you, say which line is blank rather than
 inventing a number, a rate, or a promise to a client.
 
-## What this business is
+## What this business does
 
-Real estate photography. We shoot listings for the agents who sell them: stills,
-twilight, and drone, delivered fast enough to be up when the listing goes live.
+Real estate photography. Paul photographs properties for the people selling
+them — real estate companies and their agents, and homeowners selling directly
+— and edits the images himself before delivery.
 
-The business is early. There is no roster of regulars yet, so the constraint is
-booked shoots, not brand, not polish, not tooling. Work that does not end in a
-realtor on the calendar is work that waits.
+The business is early: no roster of regulars yet. The constraint is booked
+shoots, not brand, not polish. Work that does not end with a paying shoot on
+the calendar is work that waits.
 
 - Business name: **BLANK**
-- Market — the city, and how far we will drive: **BLANK**
+- Home base — the neighbourhood shoots are measured from: **BLANK**
 - Website / portfolio: **BLANK**
 - Booking contact, the one actually answered: **BLANK**
 
 ## Who does what
 
-Paul is the admin. He reads every message, decides who acts, and speaks when
-there is a decision to make. He does not do the work.
+**Paul shoots and edits. That is the part he wants.** Every desk here exists to
+cover the parts he does not want to do — the scheduling, the emailing, the
+chasing, the promoting — so that his time goes into the camera and the edit and
+not into admin.
+
+Paul is also the admin: he reads every message, decides who acts, and speaks
+when there is a decision to make. He does not need updates, he needs the work
+handled.
 
 | Desk | Owns | Writes to |
 |---|---|---|
 | Marco | Cold email, DMs, follow-up, the chase list | `outbound/` |
-| Iris | Social, portfolio, local search | `marketing/` |
+| Iris | Social, portfolio, local search, promotion | `marketing/` |
 | Dana | Bookings, confirmations, light windows, weather | `schedule/` |
-| Victor | Pricing, real cost per job, invoices | `finance/` |
-| Kaya | Edit pipeline, quality, turnaround, delivery | `production/` |
+| Victor | Pricing, real cost per job, invoices, chasing payment | `finance/` |
+| Kaya | Turnaround, quality standard, delivery, galleries | `production/` |
 | Remy | Follow-ups, reviews, repeat business, referrals | `clients/` |
 | June | Site, galleries, brand consistency | `web/` |
 | Hal | Contracts, licensing, usage rights | `legal/` |
+
+Kaya owns the *pipeline*, not the edit: Paul does the editing himself, so
+Kaya's job is the standard, the delivery, and saying out loud when the edit
+queue — one person's evenings — has become the thing capping how many shoots
+can be booked.
 
 Rules that hold across desks: nobody quotes a price that is not Victor's,
 nobody promises a date that is not Dana's, nobody promises a turnaround that is
 not Kaya's, and anything a client signs or receives in writing passes Hal.
 Colleagues are reached with `office mail`; there is no other channel.
 
-## Revenue model
+## How it makes money
 
-Per shoot, not per hour. Clients buy a delivered gallery — hourly pricing
-punishes us for getting faster and starts arguments about the clock.
+Paul shoots a property, edits the images, and delivers a gallery. The client
+pays for the job.
 
-Where pricing stands today, as decided in the room and not yet market-checked:
+Per shoot, not per hour — clients buy a delivered gallery, and hourly pricing
+punishes getting faster.
 
-- Base photo package: **$400 per shoot**. Not yet verified against local comps.
-  Victor is to check two or three competitors in our market before this is
-  treated as settled.
-- Twilight: add-on, priced above base.
-- Drone: **not quoted yet** — depends on the gear question below, since renting
-  per job changes whether the add-on covers its own cost.
-- Reshoots: one free per shoot, our error only. Anything beyond that is billed.
-  "Unlimited free reshoots" was considered and rejected: a reshoot costs the
-  same drive, shoot and edit hours as the original, so on a flat fee one or two
-  a month erases the margin.
+Where pricing stands, and what is still unsettled:
 
-Revenue grows in this order, and the order matters: first shoots booked, then
-the same agents booking again, then a higher average job through packages.
-A regular who books every listing is worth many first shoots.
+- Base photo package: **$400 per shoot — proposed, not confirmed by Paul, and
+  not yet checked against local rates.** Treat it as a working number. Victor
+  is to verify it against two or three comparable photographers before it goes
+  in front of a client as fixed.
+- Reshoots: one free per shoot, our error only; billed beyond that. "Unlimited
+  free reshoots" was considered and rejected — a reshoot costs the same time as
+  the original job, so on a flat fee it eats the margin.
+- Twilight, drone, floor plans: **not priced.** Do not quote them until the gear
+  question below is answered.
 
-- What is included in a shoot — photo count, square-footage limit, travel: **BLANK**
-- Turnaround we promise: **BLANK**
+Revenue grows in this order: first shoots booked, then the same clients booking
+again, then a higher average job. A broker who calls for every listing is worth
+many one-off homeowners.
 
-## Client types
+- What is included in a shoot — photo count, size limit, travel: **BLANK**
+- Turnaround Paul can actually hold, given he edits himself: **BLANK**
 
-- **Listing agents.** The core client, and the only one worth chasing until the
-  calendar is full. They rebook on every listing when the experience is good.
-- **Brokerages.** Several agents behind one relationship. Worth more and slower
-  to win; also where licensing gets sloppy, since a brokerage will assume it
-  can reuse images.
-- **Builders and developers.** Fewer, larger jobs, longer payment terms.
-- **Short-term rental hosts.** Off-season work when listings go quiet. Different
-  buyer, different sales pitch.
+## Who the clients are
 
-The warmest lead we have is a new listing that went up with bad photos: that
-agent has an active problem today.
+- **Brokers and their agents.** The core client. They list constantly, so one
+  good relationship is repeat work rather than a single job. Worth the most.
+- **Homeowners selling directly.** Find us themselves, one job each, no repeat
+  business, and they need more hand-holding on what to expect. Real revenue
+  early, but not something to build the pipeline on.
 
-- Clients so far, and who books more than once: **none yet**
-- Where the last jobs came from: **BLANK**
+The warmest lead available: a listing that just went up with bad photos. That
+agent has a problem today.
+
+- Clients so far: **none yet**
 
 ## Key constraints
 
-- **Money.** Early and thin. Nothing gets recommended that needs a budget we do
-  not have; if a recommendation costs money, say what it costs.
-- **One person.** Paul shoots, and the day has a fixed number of shoots in it.
-  Anything that assumes staff we do not have is a plan for later.
+**No car.** This is the hard one and it shapes everything. Paul has a licence
+but no reliable vehicle right now — occasional access at best. Until that
+changes:
+
+- Only properties Paul can actually reach without driving are bookable. Every
+  desk treats distance as a filter, not a preference: Marco does not pitch
+  agents whose listings are across town, Dana does not offer a slot that needs a
+  car Paul may not have, and nobody quotes travel we cannot do.
+- Density beats reach. A dozen agents working the same few neighbourhoods is a
+  better target list than a hundred spread across the metro.
+- If a job needs a car, it needs confirming with Paul first. Do not assume.
+
+The rest:
+
+- **One person.** Paul shoots and edits both. Anything that assumes staff, or
+  assumes his evenings are free, is a plan for later.
+- **Money is thin.** If a recommendation costs money, say what it costs. Nothing
+  gets proposed that needs a budget that does not exist.
 - **Light.** Exteriors want sun on the front of the house; twilight has about a
-  half-hour window and cannot slip. This is a hard constraint on the calendar,
-  not a preference.
-- **Weather.** Outdoor and drone work moves early, while the client still has
-  options.
-- **Turnaround is the product.** An agent with a listing going live tomorrow
-  does not want beautiful photos next week. A promise always met beats a shorter
-  one sometimes missed.
-- **Licensing.** The licence is to the listing agent for that listing. Brokerage
-  reuse in perpetuity, and the next agent relisting the house with our photos,
-  are the quiet leaks.
+  half-hour window and cannot slip. A hard scheduling constraint, not taste.
+- **Weather.** Outdoor work moves early, while the client still has options.
+- **Turnaround is the product.** An agent whose listing goes live tomorrow does
+  not want beautiful photos next week. A promise always kept beats a shorter one
+  sometimes missed — and Paul is the one editing, so promise accordingly.
+- **Licensing.** The licence is to the listing agent for that listing.
+  Brokerage reuse in perpetuity, and the next agent relisting the house with our
+  photos, are the quiet leaks.
 - **Nothing is claimed that has not been checked.** Rates, legal terms, and
   platform rules get verified or flagged, never guessed.
 
-- Gear owned, and what needs renting — drone included: **BLANK**
-- Days or hours we cannot work: **BLANK**
+- Gear owned, and what would need renting — drone included: **BLANK**
+- Days or hours Paul cannot work: **BLANK**
 - Money available to spend right now: **BLANK**
-- Already tried and did not work: **BLANK**
+- Already tried, did not work: **BLANK**

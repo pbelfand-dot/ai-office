@@ -150,6 +150,8 @@ main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; 
 #composer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); flex: none; }
 #composer input { margin-top: 0; flex: 1; }
 #composer button { flex: none; }
+#mic[data-on="1"] { border-color: var(--parked); color: var(--parked); animation: pulse 1.4s ease-in-out infinite; }
+@keyframes pulse { 50% { opacity: .55; } }
 aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px; }
 aside h2 {
   font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
@@ -213,6 +215,7 @@ const BODY = `
       <div id="log"></div>
       <form id="composer">
         <input type="text" id="say" autocomplete="off" placeholder="Say something to the floor. @name if you already know whose it is.">
+        <button type="button" id="mic" hidden title="Talk instead of typing">Talk</button>
         <button type="submit">Send</button>
       </form>
     </section>
@@ -673,6 +676,73 @@ document.getElementById("composer").onsubmit = function (e) {
     body: JSON.stringify({ body: text })
   }).then(refresh).catch(function () { input.value = text; });
 };
+
+/* Talking to the floor, by talking.
+   The browser's own recogniser: no key, no upload, no dependency, and the
+   audio never leaves the machine. Chrome and Safari have it behind a prefix;
+   Firefox does not, which is why the button ships hidden and is only revealed
+   once we know there is something behind it. */
+(function () {
+  var Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  var mic = document.getElementById("mic");
+  if (!Recognition || !mic) return;
+  mic.hidden = false;
+
+  var input = document.getElementById("say");
+  var recogniser = new Recognition();
+  recogniser.continuous = true;
+  recogniser.interimResults = true;
+  recogniser.lang = navigator.language || "en-US";
+
+  /* What was typed or already said stays put: dictation appends to it rather
+     than replacing it, so a correction by hand is not undone by the next
+     phrase. */
+  var settled = "";
+  var listening = false;
+
+  recogniser.onresult = function (event) {
+    var pending = "";
+    for (var i = event.resultIndex; i < event.results.length; i++) {
+      var text = event.results[i][0].transcript;
+      if (event.results[i].isFinal) settled += text;
+      else pending += text;
+    }
+    input.value = (settled + pending).replace(/\s+/g, " ").trimStart();
+  };
+
+  recogniser.onerror = function (event) {
+    stop();
+    if (event.error === "not-allowed" || event.error === "service-not-allowed") {
+      input.placeholder = "Microphone blocked. Allow it in the address bar, then press Talk again.";
+    }
+  };
+  /* Chrome ends the session on its own after a pause; keep going until the
+     button says otherwise, so a thinking silence is not a full stop. */
+  recogniser.onend = function () { if (listening) { try { recogniser.start(); } catch (err) { stop(); } } };
+
+  function stop() {
+    listening = false;
+    mic.removeAttribute("data-on");
+    mic.textContent = "Talk";
+    try { recogniser.stop(); } catch (err) { /* already stopped */ }
+  }
+
+  mic.onclick = function () {
+    if (listening) { stop(); input.focus(); return; }
+    settled = input.value ? input.value.trim() + " " : "";
+    listening = true;
+    mic.setAttribute("data-on", "1");
+    mic.textContent = "Stop";
+    try { recogniser.start(); } catch (err) { stop(); }
+  };
+
+  /* Sending ends the dictation: the next thought is a new message. */
+  document.getElementById("composer").addEventListener("submit", function () {
+    if (listening) stop();
+    settled = "";
+  });
+})();
+
 window.addEventListener("resize", function () { if (S) { layout(); renderDesks(); remeasure(); renderBurn(); } });
 
 var es = new EventSource("/api/stream");

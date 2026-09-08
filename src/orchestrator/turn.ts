@@ -62,6 +62,7 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
   await office.saveState({ ...state, status: "working", currentTaskId: chat ? state.currentTaskId : task?.id });
 
   const cwd = await office.worktrees.ensure(agentId);
+  await office.syncBrief(cwd);
   const before = await office.worktrees.touchedFiles(agentId);
   const outboxBefore = (await office.mail.outbox(agentId)).length;
 
@@ -87,7 +88,7 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
     tier: verdict.tier,
     model: office.modelFor(role.provider, verdict.tier),
     autonomy: role.autonomy,
-    sessionId: chat ? state.chatSessionId : state.sessionId,
+    sessionId: chat ? undefined : resumable(state, task),
     allowedTools: opts.allowedTools ?? role.allowedTools,
     disallowedTools: opts.disallowedTools ?? role.disallowedTools,
     timeoutMs: opts.timeoutMs ?? office.config.defaults.turnTimeoutMs,
@@ -134,8 +135,12 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
   // Forgetting it costs the thread and nothing else.
   const thread = (stored?: string) => (result.sessionLost ? undefined : result.sessionId ?? stored);
   const next: AgentState = chat
-    ? { ...state, chatSessionId: thread(state.chatSessionId), updatedAt: nowIso() }
-    : applyObservation({ ...state, sessionId: thread(state.sessionId), currentTaskId: task?.id }, observation, decision);
+    ? { ...state, chatSessionId: undefined, updatedAt: nowIso() }
+    : applyObservation(
+        { ...state, sessionId: thread(state.sessionId), sessionTaskId: task?.id, currentTaskId: task?.id },
+        observation,
+        decision,
+      );
 
   const gate = needsApproval(role, { touchedFiles, costUsd: result.costUsd }, office.config.providers[role.provider].escalateAboveUsdPerTask);
   let escalationId: string | undefined;
@@ -173,6 +178,21 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
     breakerStage: decision.stage,
     touchedFiles,
   };
+}
+
+/**
+ * The work thread, but only within one task.
+ *
+ * A session resumed forever is a context that grows forever, and it is re-read
+ * on every turn after it: the measured floor spent most of its money on cache
+ * reads of a session nobody had pruned, against fresh input of a few dozen
+ * tokens. Task instructions are written to stand alone, so a new task is the
+ * natural place to start a new thread -- continuity inside a task is kept, the
+ * accumulation across unrelated tasks is not.
+ */
+function resumable(state: AgentState, task: Task | null): string | undefined {
+  if (!state.sessionId) return undefined;
+  return state.sessionTaskId === task?.id ? state.sessionId : undefined;
 }
 
 function lastSteer(_n: number): string {

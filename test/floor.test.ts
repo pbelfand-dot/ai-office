@@ -455,3 +455,48 @@ describe("init keeps its own state out of your history", () => {
     assert.equal(ignored.split("\n").filter((l) => l.trim() === ".office/").length, 1);
   });
 });
+
+describe("what a session is allowed to accumulate", () => {
+  test("a work thread continues within a task and starts fresh for the next", async () => {
+    const root = await makeRepo();
+    await seedFloor(root);
+    const driver = new FakeDriver();
+    const office = await Office.open(root, driver);
+
+    const first = { id: "task_a", briefId: "b", title: "t", instruction: "i", assignee: "ada",
+      state: "pending" as const, dependsOn: [], createdAt: nowIso(), attempts: 0 };
+    await runTurn(office, "ada", first, "do it");
+    await runTurn(office, "ada", first, "keep going");
+    assert.equal(driver.calls[1]?.sessionId, "fake-session-ada", "same task, same thread");
+
+    // A new task is a new context. Carrying the old one over is how a desk
+    // ends up re-reading an afternoon of unrelated work on every turn.
+    await runTurn(office, "ada", { ...first, id: "task_b" }, "different work");
+    assert.equal(driver.calls[2]?.sessionId, undefined, "new task, new thread");
+  });
+});
+
+test("--force replaces the desks but never the owner's own answers", async () => {
+  const root = await makeRepo();
+  const opts = { root, plan: "max5x" as const, codexPlan: "none" as const, force: true, seed: true, floor: "photography" };
+  await init(opts);
+  await writeFile(join(root, "business.md"), "# mine\n\nMarket: my street. No car.\n", "utf8");
+
+  await init(opts);
+  assert.match(await readFile(join(root, "business.md"), "utf8"), /No car/, "re-running setup is not consent to wipe this");
+});
+
+test("the business brief reaches the desks before it reaches git", async () => {
+  const root = await makeRepo();
+  await seedFloor(root);
+  await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle", brief: "business.md" });
+  // Written, deliberately never committed: this is the normal state of a file
+  // you are still editing, and the desks work from a checkout of HEAD.
+  await writeFile(join(root, "business.md"), "# mine\n\nNo car. Walkable jobs only.\n", "utf8");
+
+  const office = await Office.open(root, new FakeDriver());
+  await runTurn(office, "ada", null, "what do you know about the business?");
+
+  const seen = await readFile(join(office.paths.worktree("ada"), "business.md"), "utf8");
+  assert.match(seen, /No car/, "the desk can read what was never committed");
+});

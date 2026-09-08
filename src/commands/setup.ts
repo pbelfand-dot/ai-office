@@ -29,7 +29,7 @@ export async function init(opts: InitOptions): Promise<string> {
     throw new Error(`no floor called "${opts.floor}". Available: ${Object.keys(available).join(", ")}`);
   }
 
-  const config = { ...defaultConfig(opts.plan, opts.codexPlan), router: floor.router, orchestrator: floor.orchestrator };
+  const config = { ...defaultConfig(opts.plan, opts.codexPlan), router: floor.router, orchestrator: floor.orchestrator, brief: floor.brief?.path ?? "" };
   await saveConfig(paths.config, config);
   await paths.ensureOffice();
   await mkdir(paths.rolesDir, { recursive: true });
@@ -84,9 +84,15 @@ export async function init(opts: InitOptions): Promise<string> {
     lines.push(`${green("ignored")} .office/ ${dim("-- runtime state, not something to commit")}`);
   }
 
+  // Never overwritten, not even by --force. --force is about this tool's own
+  // files: the config and the desks it seeded. What is written here is the
+  // owner's answers about their business, and re-running setup is not consent
+  // to throw those away.
   if (floor.brief) {
     const path = join(opts.root, floor.brief.path);
-    if (opts.force || !(await exists(path))) {
+    if (await exists(path)) {
+      lines.push(`${dim("kept")}    ${floor.brief.path} ${dim("-- your answers, left alone")}`);
+    } else {
       await writeFile(path, floor.brief.body, "utf8");
       lines.push(`${green("created")} ${floor.brief.path} ${dim("-- fill this in; every desk reads it first")}`);
     }
