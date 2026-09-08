@@ -5,6 +5,7 @@ import { runTurn, type TurnOutcome } from "../orchestrator/turn.js";
 import { NO_WRITES, READ_ONLY_TOOLS, followUpPrompt, parseFollowUp, route, type Assignment, type Routing } from "./router.js";
 import { nowIso, shortId, truncate } from "../util.js";
 import { renderTranscript, speakerName } from "./transcript.js";
+import { Scheduler, type RunSummary } from "../orchestrator/scheduler.js";
 
 export interface ChatExchange {
   posted: ChatMessage;
@@ -12,6 +13,8 @@ export interface ChatExchange {
   replies: ChatMessage[];
   /** Work the router put on the queue, if it assigned any. */
   queued: Task[];
+  /** What the floor got through of it before the ceiling, if it ran. */
+  worked: RunSummary | null;
 }
 
 /**
@@ -67,7 +70,46 @@ export async function say(office: Office, body: string, opts: { channel?: string
   if (closing.say && closing.say !== routing.say) replies.push(await office.chat.post({ channel, from: office.config.router, body: closing.say, replyTo: posted.id }));
   queued.push(...(await assign(office, closing.assignments, channel, posted)));
 
-  return { posted, routing, replies, queued };
+  // Results go into the replies, not just into the channel file: a terminal
+  // that prints the assignment and swallows the outcome is how "it did nothing"
+  // survives the floor having done the thing.
+  const worked = queued.length ? await work(office, channel, posted) : null;
+  replies.push(...(worked?.said ?? []));
+  return { posted, routing, replies, queued, worked: worked?.summary ?? null };
+}
+
+/**
+ * Work the queue the conversation just filled, and report back in the room.
+ *
+ * Without this the floor answers you, agrees what should happen, and then does
+ * nothing until you remember a second command -- which reads exactly like
+ * nobody doing anything. The ceiling is the point: these are full work turns,
+ * and one sentence should not be able to commit the afternoon.
+ */
+async function work(office: Office, channel: string, prompt: ChatMessage): Promise<{ summary: RunSummary; said: ChatMessage[] } | null> {
+  const ceiling = office.config.chat.autoRun;
+  if (ceiling <= 0) return null;
+
+  const summary = await new Scheduler(office).run({ maxTurns: ceiling });
+  const after = await office.tasks();
+  const said: ChatMessage[] = [];
+
+  // Finished work is posted by the desk that did it, because "Victor wrote the
+  // pricing" belongs in the room the same way Victor's opinion did.
+  for (const task of after.filter((t) => summary.completed.includes(t.id))) {
+    said.push(await office.chat.post({ channel, from: task.assignee, body: task.result ?? `Finished: ${task.title}`, replyTo: prompt.id }));
+  }
+
+  const left = after.filter((t) => t.state === "pending" || t.state === "assigned" || t.state === "running");
+  if (left.length) {
+    said.push(await office.chat.post({
+      channel,
+      from: SYSTEM,
+      body: `${left.length} still on the queue after ${summary.turns} turn(s) -- ${summary.stoppedBecause}. \`office run\` picks it back up.`,
+      replyTo: prompt.id,
+    }));
+  }
+  return { summary, said };
 }
 
 /** A second look from a visible boss, once the room has answered. */
@@ -129,7 +171,9 @@ async function assign(office: Office, assignments: Assignment[], channel: string
   await office.chat.post({
     channel,
     from: SYSTEM,
-    body: `On the queue now -- ${lines.join("; ")}. Run \`office run\` to work it.`,
+    body: office.config.chat.autoRun > 0
+      ? `On it now -- ${lines.join("; ")}.`
+      : `On the queue now -- ${lines.join("; ")}. Run \`office run\` to work it.`,
     replyTo: prompt.id,
   });
   return tasks;

@@ -20,7 +20,7 @@ export async function chat(office: Office, message: string | undefined, opts: { 
     return history.map((m) => render(office, m.from, m.body, m.at)).join("\n\n");
   }
 
-  const { posted, routing, replies, queued } = await say(office, message, { channel });
+  const { posted, routing, replies, queued, worked } = await say(office, message, { channel });
   const lines = [render(office, posted.from, posted.body, posted.at), "", dim(`routed to ${routing.recipients.join(", ") || "nobody"} — ${routing.reason}`)];
 
   if (replies.length === 0) {
@@ -34,9 +34,13 @@ export async function chat(office: Office, message: string | undefined, opts: { 
   // idle, the queue fills up quietly, and the honest conclusion is that the
   // floor did nothing. The room shows this line; so should the terminal.
   if (queued.length) {
-    lines.push("", bold(`${queued.length} on the queue`));
+    lines.push("", bold(`${queued.length} assigned`));
     for (const task of queued) lines.push(`  ${speakerName(office, task.assignee)} — ${task.title}`);
-    lines.push(dim("  office run     to work it, or watch it happen in office serve"));
+    lines.push(
+      worked
+        ? dim(`  worked ${worked.turns} turn(s): ${worked.completed.length} done, ${worked.stoppedBecause}`)
+        : dim("  office run     to work it, or watch it happen in office serve"),
+    );
   }
   return lines.join("\n");
 }

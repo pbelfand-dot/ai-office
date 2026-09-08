@@ -11,6 +11,7 @@ import { Scheduler } from "../src/orchestrator/scheduler.js";
 import { runTurn } from "../src/orchestrator/turn.js";
 import { FakeDriver, type TurnRequest } from "../src/runner/driver.js";
 import { saveConfig, defaultConfig } from "../src/config.js";
+import { init } from "../src/commands/setup.js";
 import { writeJsonAtomic, nowIso, shortId } from "../src/util.js";
 import type { Task } from "../src/types.js";
 
@@ -431,4 +432,26 @@ test("a worktree directory deleted behind git's back is recovered, not fatal", a
   const again = await office.worktrees.ensure("ada");
   assert.equal(again, first);
   assert.ok(await stat(again).then(() => true, () => false), "the desk has somewhere to work again");
+});
+
+describe("init keeps its own state out of your history", () => {
+  test(".office is gitignored, and an existing .gitignore is added to, not replaced", async () => {
+    const root = await makeRepo();
+    await writeFile(join(root, ".gitignore"), "node_modules\n", "utf8");
+    await init({ root, plan: "max5x", codexPlan: "none", force: true, seed: false, floor: "code" });
+
+    const ignored = await readFile(join(root, ".gitignore"), "utf8");
+    assert.match(ignored, /^node_modules$/m, "what was already there survives");
+    assert.match(ignored, /^\.office\/$/m);
+  });
+
+  test("running init twice does not stack the entry", async () => {
+    const root = await makeRepo();
+    const opts = { root, plan: "max5x" as const, codexPlan: "none" as const, force: true, seed: false, floor: "code" };
+    await init(opts);
+    await init(opts);
+
+    const ignored = await readFile(join(root, ".gitignore"), "utf8");
+    assert.equal(ignored.split("\n").filter((l) => l.trim() === ".office/").length, 1);
+  });
 });

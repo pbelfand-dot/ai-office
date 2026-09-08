@@ -73,6 +73,17 @@ export async function init(opts: InitOptions): Promise<string> {
     }
   }
 
+  // .office holds a git worktree per desk. Committed by accident it turns every
+  // `git add -A` into a warning about embedded repositories, and the state that
+  // is meant to be disposable becomes history you have to clean up.
+  const ignore = join(opts.root, ".gitignore");
+  const ignored = (await read(ignore)) ?? "";
+  if (!ignored.split("\n").some((line) => line.trim().replace(/\/$/, "") === ".office")) {
+    const spacer = ignored && !ignored.endsWith("\n") ? "\n" : "";
+    await writeFile(ignore, `${ignored}${spacer}\n# the office's own state: worktrees, ledger, chat\n.office/\n`, "utf8");
+    lines.push(`${green("ignored")} .office/ ${dim("-- runtime state, not something to commit")}`);
+  }
+
   if (floor.brief) {
     const path = join(opts.root, floor.brief.path);
     if (opts.force || !(await exists(path))) {

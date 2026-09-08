@@ -26,7 +26,7 @@ async function makeFloor(): Promise<string> {
   await exec("git", ["add", "-A"], { cwd: root });
   await exec("git", ["commit", "-qm", "init"], { cwd: root });
 
-  await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle" });
+  await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle", chat: { ...defaultConfig("max5x").chat, autoRun: 0 } });
   const roles = join(root, "office", "agents");
   await mkdir(roles, { recursive: true });
   await writeFile(join(roles, "michelle.md"), "---\nname: Michelle\ntitle: Head of Floor\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
@@ -181,7 +181,7 @@ describe("an admin who routes in the open", () => {
     const roles = join(root, "office", "agents");
     await writeFile(join(roles, "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
     await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Money\ntier: mid\nautonomy: trusted\n---\n\nYou own pricing.\n", "utf8");
-    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul" });
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul", chat: { ...defaultConfig("max5x").chat, autoRun: 0 } });
     return root;
   }
 
@@ -236,7 +236,7 @@ describe("a question never reaches nobody", () => {
   async function bossOnly(): Promise<string> {
     const root = await makeFloor();
     await writeFile(join(root, "office", "agents", "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
-    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul" });
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul", chat: { ...defaultConfig("max5x").chat, autoRun: 0 } });
     return root;
   }
 
@@ -305,7 +305,7 @@ describe("the boss assigns after hearing the answer", () => {
     const root = await makeFloor();
     await writeFile(join(root, "office", "agents", "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
     await writeFile(join(root, "office", "agents", "victor.md"), "---\nname: Victor\ntitle: Finance\ntier: mid\nautonomy: trusted\n---\n\nYou own money.\n", "utf8");
-    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul" });
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul", chat: { ...defaultConfig("max5x").chat, autoRun: 0 } });
 
     // Routing cannot know about the blocker: it happens before ada speaks.
     const office = await Office.open(root, new FakeDriver((req) =>
@@ -345,5 +345,72 @@ describe("serving the room", () => {
     } finally {
       await first.close();
     }
+  });
+});
+
+describe("the queue works itself", () => {
+  /** A switchboard that assigns, and a desk that finishes and says so. */
+  const assigns = (req: TurnRequest) =>
+    req.agent === "switchboard"
+      ? { text: '{"reply":[],"why":"work, not talk","assign":[{"to":"ada","task":"Write the sequence into outbound/"}]}' }
+      : { text: "Wrote it.\n\nOFFICE-DONE: wrote the sequence into outbound/" };
+
+  test("work assigned in the chat is done without a second command", async () => {
+    const root = await makeFloor();
+    await saveConfig(join(root, "office.config.json"), {
+      ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle",
+      chat: { ...defaultConfig("max5x").chat, autoRun: 4 },
+    });
+    const office = await Office.open(root, new FakeDriver(assigns));
+
+    const { queued, worked, replies } = await say(office, "we need the outreach sequence written up today please");
+    assert.equal(queued.length, 1);
+    assert.equal(worked?.completed.length, 1, "the floor worked it there and then");
+
+    const stored = await office.tasks();
+    assert.equal(stored[0]?.state, "done");
+    assert.match(stored[0]?.result ?? "", /wrote the sequence/);
+
+    // And the room is told by the desk that did it, not by a status line.
+    const history = await office.chat.history("floor");
+    assert.equal(history.at(-1)?.from, "ada");
+    assert.match(history.at(-1)?.body ?? "", /wrote the sequence/);
+
+    // The outcome has to come back with the exchange too, or the terminal
+    // prints the assignment, swallows the result, and looks like nothing ran.
+    assert.equal(replies.at(-1)?.from, "ada");
+    assert.match(replies.at(-1)?.body ?? "", /wrote the sequence/);
+  });
+
+  test("autoRun 0 assigns and waits, for anyone who wants the second command", async () => {
+    const root = await makeFloor();
+    await saveConfig(join(root, "office.config.json"), {
+      ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle",
+      chat: { ...defaultConfig("max5x").chat, autoRun: 0 },
+    });
+    const office = await Office.open(root, new FakeDriver(assigns));
+
+    const { queued, worked } = await say(office, "we need the outreach sequence written up today please");
+    assert.equal(queued.length, 1);
+    assert.equal(worked, null);
+    assert.equal((await office.tasks())[0]?.state, "pending", "still waiting to be run");
+  });
+
+  test("the ceiling is what stops one sentence buying an afternoon", async () => {
+    const root = await makeFloor();
+    await saveConfig(join(root, "office.config.json"), {
+      ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle",
+      chat: { ...defaultConfig("max5x").chat, autoRun: 2 },
+    });
+    // A desk that never signals completion is the expensive case: without a
+    // ceiling the scheduler would retry it to the attempt limit.
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent === "switchboard"
+        ? { text: '{"reply":[],"why":"work","assign":[{"to":"ada","task":"An endless task"}]}' }
+        : { text: "Still going." }));
+
+    const { worked } = await say(office, "please get someone started on the endless thing");
+    assert.equal(worked?.turns, 2, "stopped at the ceiling");
+    assert.equal((await office.tasks())[0]?.state, "assigned", "and left it on the queue");
   });
 });

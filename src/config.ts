@@ -76,6 +76,17 @@ export interface ChatConfig {
   turnTimeoutMs: number;
   /** How much of the channel each reply and each routing decision sees. */
   historyDepth: number;
+  /**
+   * Turns the floor may spend working what the chat just assigned. 0 waits.
+   *
+   * Assigning work and then waiting to be told to do it is the difference
+   * between staff and a suggestion box -- you ask, the desks answer, and then
+   * nothing exists until you remember a second command. So the queue runs
+   * itself, but on a leash: these are full work turns at full price, and the
+   * ceiling is what stops one sentence from committing an afternoon of them.
+   * The ledger and the gate still apply on top.
+   */
+  autoRun: number;
 }
 
 /** Scaled off the published plan multiples. Hypotheses, not quotas. */
@@ -126,7 +137,7 @@ export function defaultConfig(plan: Plan = "max5x", codexPlan: CodexPlan = "none
     driver: "real",
     orchestrator: "michelle",
     router: "switchboard",
-    chat: { channel: "floor", maxTier: "mid", routerTier: "small", turnTimeoutMs: 3 * 60_000, historyDepth: 24 },
+    chat: { channel: "floor", maxTier: "mid", routerTier: "small", turnTimeoutMs: 3 * 60_000, historyDepth: 24, autoRun: 6 },
   };
 }
 
@@ -208,6 +219,9 @@ export function validateConfig(config: OfficeConfig): OfficeConfig {
   }
   if (config.chat.turnTimeoutMs < 1000) throw new Error("chat.turnTimeoutMs must be at least 1000");
   if (config.chat.historyDepth < 1) throw new Error("chat.historyDepth must be at least 1");
+  if (!Number.isInteger(config.chat.autoRun) || config.chat.autoRun < 0) {
+    throw new Error(`chat.autoRun must be a turn ceiling of 0 or more, got ${config.chat.autoRun}`);
+  }
   return config;
 }
 
