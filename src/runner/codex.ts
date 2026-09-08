@@ -48,14 +48,14 @@ export class CodexDriver implements Driver {
     const model = req.model ?? "default";
     const proc = await runProcess(this.bin, this.buildArgs(req), { cwd: req.cwd, env: req.env, timeoutMs: req.timeoutMs });
 
-    if (proc.spawnError) return failed(startupFailure(this.bin, "codex", proc.spawnError), req.sessionId ?? "", model, Date.now() - started);
-    if (proc.timedOut) return failed(`turn exceeded ${Math.round(req.timeoutMs / 1000)}s and was killed`, req.sessionId ?? "", model, Date.now() - started);
+    if (proc.spawnError) return failed(startupFailure(this.bin, "codex", proc.spawnError), undefined, model, Date.now() - started);
+    if (proc.timedOut) return failed(`turn exceeded ${Math.round(req.timeoutMs / 1000)}s and was killed`, req.sessionId, model, Date.now() - started);
 
     const parsed = parseCodexStream(proc.stdout, req.sessionId, model, Date.now() - started);
     if (parsed) return parsed;
     return failed(
       `${this.bin} exited ${proc.code} without a parseable event stream: ${(proc.stderr || proc.stdout).trim().slice(0, 500) || "no output"}`,
-      req.sessionId ?? "", model, Date.now() - started,
+      req.sessionId, model, Date.now() - started,
     );
   }
 }

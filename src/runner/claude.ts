@@ -53,7 +53,8 @@ export class ClaudeDriver implements Driver {
     const model = req.model ?? "default";
     const proc = await runProcess(this.bin, args, { cwd: req.cwd, env: req.env, timeoutMs: req.timeoutMs });
 
-    if (proc.spawnError) return failed(startupFailure(this.bin, "claude", proc.spawnError), sessionId, model, Date.now() - started);
+    // No session id on a process that never started: it created nothing.
+    if (proc.spawnError) return failed(startupFailure(this.bin, "claude", proc.spawnError), undefined, model, Date.now() - started);
     if (proc.timedOut) return failed(`turn exceeded ${Math.round(req.timeoutMs / 1000)}s and was killed`, sessionId, model, Date.now() - started);
 
     const parsed = parseClaudeResult(proc.stdout, sessionId, model, Date.now() - started);

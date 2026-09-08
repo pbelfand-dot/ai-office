@@ -745,3 +745,20 @@ describe("finding the CLI", () => {
     assert.equal(resolveBin("definitely-not-installed-xyz"), "definitely-not-installed-xyz");
   });
 });
+
+describe("a turn that never started", () => {
+  const request = {
+    agent: "ada", prompt: "p", systemPrompt: "s", cwd: process.cwd(), tier: "mid" as const,
+    autonomy: "scoped" as const, allowedTools: [], disallowedTools: [], timeoutMs: 5000, addDirs: [],
+  };
+
+  // The id is generated before the spawn, so reporting it on a CLI that never
+  // ran would store a session that does not exist -- and every later turn on
+  // that desk then dies trying to resume it.
+  test("reports no session id, because it created no session", async () => {
+    const result = await new ClaudeDriver("definitely-not-installed-xyz").run(request);
+    assert.equal(result.ok, false);
+    assert.equal(result.sessionId, undefined);
+    assert.match(result.error ?? "", /providers\.claude\.bin/);
+  });
+});

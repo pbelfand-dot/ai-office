@@ -65,7 +65,14 @@ export function startupFailure(bin: string, provider: Provider, spawnError: stri
   );
 }
 
-export function failed(error: string, sessionId: string, model: string, durationMs: number): TurnResult {
+/**
+ * `sessionId` is optional here for one reason: a turn that never ran did not
+ * create a session, and claiming one poisons the desk. The id is generated
+ * before the spawn, so it is tempting to report it either way -- but then a CLI
+ * that could not start hands back an id for a conversation that does not exist,
+ * and every turn afterwards fails trying to resume it.
+ */
+export function failed(error: string, sessionId: string | undefined, model: string, durationMs: number): TurnResult {
   return {
     ok: false, text: "", sessionId, model, costUsd: 0,
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
