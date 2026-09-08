@@ -50,11 +50,24 @@ export class WorktreeManager {
     if (await exists(path)) return path;
 
     const branch = this.branchFor(agent);
-    const branchExists = await this.hasBranch(branch);
-    const args = branchExists
-      ? ["worktree", "add", path, branch]
-      : ["worktree", "add", "-b", branch, path, base];
-    await this.git(args);
+    const add = async () => {
+      const branchExists = await this.hasBranch(branch);
+      await this.git(branchExists
+        ? ["worktree", "add", path, branch]
+        : ["worktree", "add", "-b", branch, path, base]);
+    };
+
+    try {
+      await add();
+    } catch (err) {
+      // git still has a worktree registered at a path that is no longer there:
+      // .office was deleted, the repo was moved, a backup was restored. Without
+      // the prune the desk is dead for good, and the error it dies with is
+      // about git's bookkeeping rather than anything you did.
+      if (!/already used by worktree|missing but already registered/i.test(String(err))) throw err;
+      await this.git(["worktree", "prune"]);
+      await add();
+    }
     return path;
   }
 

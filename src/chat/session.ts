@@ -1,14 +1,17 @@
 import type { Office } from "../office.js";
-import type { ChatMessage } from "../types.js";
+import type { ChatMessage, Task } from "../types.js";
 import { HUMAN, SYSTEM } from "../types.js";
 import { runTurn, type TurnOutcome } from "../orchestrator/turn.js";
-import { NO_WRITES, READ_ONLY_TOOLS, route, type Routing } from "./router.js";
+import { NO_WRITES, READ_ONLY_TOOLS, followUpPrompt, parseFollowUp, route, type Assignment, type Routing } from "./router.js";
+import { nowIso, shortId, truncate } from "../util.js";
 import { renderTranscript, speakerName } from "./transcript.js";
 
 export interface ChatExchange {
   posted: ChatMessage;
   routing: Routing;
   replies: ChatMessage[];
+  /** Work the router put on the queue, if it assigned any. */
+  queued: Task[];
 }
 
 /**
@@ -53,7 +56,83 @@ export async function say(office: Office, body: string, opts: { channel?: string
     if (spoke) replies.push(spoke);
   }
 
-  return { posted, routing, replies };
+  const queued = await assign(office, routing.assignments, channel, posted);
+
+  // The boss gets the last word, because it is the only point at which he has
+  // heard the answers. A desk that just named a blocker has told him what to
+  // assign; before the replies, that information did not exist yet.
+  const closing = await followUp(office, channel, posted, replies.length > 0);
+  // Saying the same thing twice reads as a bug even when it is only a boss
+  // who has not changed his mind.
+  if (closing.say && closing.say !== routing.say) replies.push(await office.chat.post({ channel, from: office.config.router, body: closing.say, replyTo: posted.id }));
+  queued.push(...(await assign(office, closing.assignments, channel, posted)));
+
+  return { posted, routing, replies, queued };
+}
+
+/** A second look from a visible boss, once the room has answered. */
+async function followUp(office: Office, channel: string, prompt: ChatMessage, roomSpoke: boolean): Promise<{ assignments: Assignment[]; say?: string }> {
+  const routerId = office.config.router;
+  // A hidden switchboard is a classifier and has no standing to hand out work,
+  // and there is nothing to follow up on when nobody said anything.
+  if (!roomSpoke || !office.roles.has(routerId) || office.role(routerId).hidden) return { assignments: [] };
+
+  const history = await office.chat.history(channel, office.config.chat.historyDepth);
+  const known = office.agentIds().filter((id) => id !== routerId);
+
+  let outcome: TurnOutcome;
+  try {
+    outcome = await runTurn(office, routerId, null, followUpPrompt(office, history), {
+      thread: "chat",
+      maxTier: office.config.chat.routerTier,
+      allowedTools: READ_ONLY_TOOLS,
+      disallowedTools: NO_WRITES,
+      timeoutMs: office.config.chat.turnTimeoutMs,
+    });
+  } catch {
+    return { assignments: [] };
+  }
+
+  // Nothing assigned is the common outcome, so every failure here is silent:
+  // the room already answered, and an error about the boss's second thoughts
+  // helps nobody.
+  if (!outcome.ran || !outcome.result?.ok) return { assignments: [] };
+  return parseFollowUp(outcome.result.text, known);
+}
+
+/**
+ * Turn the router's assignments into work the floor actually does.
+ *
+ * Chat turns are read-only by design, so a desk that "agreed to write the
+ * sequence" in the channel has written nothing. A task is the difference: it
+ * runs with real tools in the desk's own worktree, under the same gate and the
+ * same budget as anything else, and it shows up in the queue where you can see
+ * it. This is why the room stops being idle after you ask it for something.
+ */
+async function assign(office: Office, assignments: Assignment[], channel: string, prompt: ChatMessage): Promise<Task[]> {
+  if (assignments.length === 0) return [];
+
+  const tasks: Task[] = assignments.map(({ to, task }) => ({
+    id: shortId("task"),
+    briefId: prompt.id,
+    title: truncate(task, 60),
+    instruction: task,
+    assignee: to,
+    state: "pending",
+    dependsOn: [],
+    createdAt: nowIso(),
+    attempts: 0,
+  }));
+  for (const task of tasks) await office.upsertTask(task);
+
+  const lines = tasks.map((t) => `${speakerName(office, t.assignee)}: ${t.title}`);
+  await office.chat.post({
+    channel,
+    from: SYSTEM,
+    body: `On the queue now -- ${lines.join("; ")}. Run \`office run\` to work it.`,
+    replyTo: prompt.id,
+  });
+  return tasks;
 }
 
 /**

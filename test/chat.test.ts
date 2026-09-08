@@ -105,7 +105,7 @@ describe("the channel", () => {
     await say(office, "@ada what does src/index.ts export?");
     const call = driver.calls.find((c) => c.agent === "ada");
     assert.ok(call, "ada answered");
-    assert.deepEqual(call?.allowedTools, ["Read", "Grep", "Glob"]);
+    assert.deepEqual(call?.allowedTools, ["Read", "Grep", "Glob", "WebSearch", "WebFetch"]);
     assert.ok(call?.disallowedTools.includes("Write") && call.disallowedTools.includes("Bash"));
     // The desk runs its work at "large"; chat is capped so talk cannot spend
     // the allowance the building is for.
@@ -197,14 +197,18 @@ describe("an admin who routes in the open", () => {
     const root = await bossFloor();
     const spoken = await say(
       await Office.open(root, new FakeDriver((req) =>
-        req.agent === "paul" ? { text: '{"reply":["ada"],"why":"hers","say":"Ada, quote the twilight package."}' } : { text: "Quoted." })),
+        req.agent !== "paul" ? { text: "Quoted." }
+          : req.prompt.includes("Your call") ? { text: '{"assign":[]}' }
+          : { text: '{"reply":["ada"],"why":"hers","say":"Ada, quote the twilight package."}' })),
       "client wants a price",
     );
     assert.deepEqual(spoken.replies.map((m) => m.from), ["paul", "ada"], "the assignment lands before the work");
 
     const quiet = await say(
       await Office.open(await bossFloor(), new FakeDriver((req) =>
-        req.agent === "paul" ? { text: '{"reply":["ada"],"why":"hers"}' } : { text: "Quoted." })),
+        req.agent !== "paul" ? { text: "Quoted." }
+          : req.prompt.includes("Your call") ? { text: '{"assign":[]}' }
+          : { text: '{"reply":["ada"],"why":"hers"}' })),
       "client wants a price",
     );
     assert.deepEqual(quiet.replies.map((m) => m.from), ["ada"], "no line from paul when he has nothing to decide");
@@ -225,6 +229,107 @@ describe("an admin who routes in the open", () => {
         : { text: "Quoted at 250." });
     const calm = await say(await Office.open(await bossFloor(), passes), "what do we charge?");
     assert.deepEqual(calm.replies.map((m) => m.from), ["ada"], "a pass never reaches the channel");
+  });
+});
+
+describe("a question never reaches nobody", () => {
+  async function bossOnly(): Promise<string> {
+    const root = await makeFloor();
+    await writeFile(join(root, "office", "agents", "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul" });
+    return root;
+  }
+
+  test("naming a desk in the line routes to them, so the question is not left hanging", () => {
+    // The exact shape that produced silence: Paul asked Marco something and
+    // routed to nobody, so Marco never got a turn to answer it.
+    const routing = parseRouting('{"reply":[],"why":"not scale yet","say":"Marco, what is blocking the first outreach?"}', ["marco", "ada"]);
+    assert.deepEqual(routing?.recipients, ["marco"]);
+  });
+
+  test("an empty pick on a real question falls to a desk, not to nobody", async () => {
+    const root = await bossOnly();
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent === "paul" && req.prompt.includes("Answer format")
+        ? { text: '{"reply":[],"why":"nobody"}' }
+        : { text: "Bookings first." }));
+
+    const { routing, replies } = await say(office, "what should i do to scale my real estate brand?");
+    assert.notDeepEqual(routing.recipients, [], "somebody holds the question");
+    assert.ok(replies.length > 0, "the room answered");
+  });
+
+  test("an acknowledgement is still allowed to land on nobody", async () => {
+    const root = await bossOnly();
+    const office = await Office.open(root, new FakeDriver(() => ({ text: '{"reply":[],"why":"just thanks"}' })));
+    const { replies } = await say(office, "cool thanks");
+    assert.deepEqual(replies, [], "small talk costs one routing turn and nothing else");
+  });
+});
+
+describe("assigning work from the chat", () => {
+  test("an assignment becomes a real task on the queue", async () => {
+    const root = await makeFloor();
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent === "switchboard"
+        ? { text: '{"reply":["ada"],"why":"hers","assign":[{"to":"ada","task":"Write five cold emails into outbound/"}]}' }
+        : { text: "On it." }));
+
+    const { queued } = await say(office, "write me five cold emails");
+    assert.equal(queued.length, 1);
+    assert.equal(queued[0]?.assignee, "ada");
+    assert.equal(queued[0]?.state, "pending");
+
+    const onQueue = await office.tasks();
+    assert.equal(onQueue.length, 1, "the scheduler can see it");
+    assert.match(onQueue[0]?.instruction ?? "", /cold emails/);
+
+    const history = await office.chat.history("floor");
+    assert.match(history.at(-1)?.body ?? "", /On the queue now/);
+  });
+
+  test("assignments to desks that do not exist are dropped, not queued", async () => {
+    const root = await makeFloor();
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent === "switchboard"
+        ? { text: '{"reply":[],"why":"x","assign":[{"to":"kevin","task":"do a thing"},{"to":"ada","task":"real work"}]}' }
+        : { text: "ok" }));
+
+    const { queued } = await say(office, "get someone on this please, whoever owns it");
+    assert.deepEqual(queued.map((t) => t.assignee), ["ada"]);
+  });
+});
+
+describe("the boss assigns after hearing the answer", () => {
+  test("a blocker named in a reply becomes somebody's task", async () => {
+    const root = await makeFloor();
+    await writeFile(join(root, "office", "agents", "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
+    await writeFile(join(root, "office", "agents", "victor.md"), "---\nname: Victor\ntitle: Finance\ntier: mid\nautonomy: trusted\n---\n\nYou own money.\n", "utf8");
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul" });
+
+    // Routing cannot know about the blocker: it happens before ada speaks.
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent !== "paul" ? { text: "I am blocked: nobody has set the price." }
+        : req.prompt.includes("Your call")
+          ? { text: '{"assign":[{"to":"victor","task":"Set the shoot price and write it to finance/pricing.md"}],"say":"Victor, price it today."}' }
+          : { text: '{"reply":["ada"],"why":"hers"}' }));
+
+    const { queued, replies } = await say(office, "what should i do to scale?");
+    assert.deepEqual(queued.map((t) => t.assignee), ["victor"], "the boss assigned off what was said");
+    assert.match(queued[0]?.instruction ?? "", /pricing\.md/);
+    assert.equal(replies.at(-1)?.from, "paul", "and said so");
+    assert.equal((await office.tasks()).length, 1);
+  });
+
+  test("a hidden switchboard hands out no work, because it is a classifier", async () => {
+    const root = await makeFloor();
+    const driver = new FakeDriver((req) =>
+      req.agent === "switchboard" ? { text: '{"reply":["ada"],"why":"hers"}' } : { text: "Blocked on pricing." });
+    const office = await Office.open(root, driver);
+
+    const { queued } = await say(office, "what should we do about the pricing page?");
+    assert.deepEqual(queued, []);
+    assert.equal(driver.calls.filter((c) => c.agent === "switchboard").length, 1, "no second pass for a hidden desk");
   });
 });
 

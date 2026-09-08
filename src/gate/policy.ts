@@ -58,6 +58,20 @@ export function checkScope(paths: string[], role: Role): ScopeCheck {
   return { allowed, violations };
 }
 
+/**
+ * Can this desk tell the office it has finished?
+ *
+ * Completion is a command the agent runs, so a role whose tools cannot run one
+ * is a role that does the work and then silently fails to say so -- and the
+ * scheduler, seeing no marker, runs it again. At full price, up to the attempt
+ * ceiling, producing the same file every time. Cheaper to refuse the task.
+ */
+export function canReportDone(role: Pick<Role, "allowedTools" | "disallowedTools">): boolean {
+  const denies = role.disallowedTools.some((t) => t === "Bash" || t.startsWith("Bash("));
+  if (denies) return false;
+  return role.allowedTools.length === 0 || role.allowedTools.some((t) => t === "Bash" || t.startsWith("Bash("));
+}
+
 export function isDestructive(command: string): boolean {
   return DESTRUCTIVE.some((re) => re.test(command));
 }

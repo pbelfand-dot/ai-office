@@ -1,6 +1,6 @@
 import { test, describe, before } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, mkdir, readFile } from "node:fs/promises";
+import { mkdtemp, writeFile, mkdir, readFile, rm, stat } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
@@ -416,4 +416,19 @@ describe("two providers, two pools", () => {
     await runTurn(office, "rex", null, "go");
     assert.equal(driver.calls.at(-1)?.model, undefined, "codex names no models, so the CLI default stands");
   });
+});
+
+test("a worktree directory deleted behind git's back is recovered, not fatal", async () => {
+  const root = await makeRepo();
+  await seedFloor(root);
+  const office = await Office.open(root, new FakeDriver());
+  const first = await office.worktrees.ensure("ada");
+
+  // What deleting .office/, moving the repo, or restoring a backup leaves:
+  // git still has the worktree registered, the directory is gone.
+  await rm(first, { recursive: true, force: true });
+
+  const again = await office.worktrees.ensure("ada");
+  assert.equal(again, first);
+  assert.ok(await stat(again).then(() => true, () => false), "the desk has somewhere to work again");
 });

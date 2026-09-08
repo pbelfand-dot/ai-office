@@ -97,8 +97,8 @@ tier: large
 autonomy: trusted
 scope:
   - office/
-allowedTools: Read, Grep, Glob
-disallowedTools: Write, Edit, Bash
+allowedTools: Read, Grep, Glob, WebSearch, WebFetch, Bash
+disallowedTools: Write, Edit
 ---
 
 Read \`business.md\` in the repo root before you decide anything. When a desk is
@@ -152,8 +152,7 @@ tier: mid
 autonomy: scoped
 scope:
   - outbound/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -199,8 +198,7 @@ tier: mid
 autonomy: scoped
 scope:
   - marketing/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -239,8 +237,7 @@ tier: small
 autonomy: scoped
 scope:
   - schedule/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -282,8 +279,7 @@ tier: mid
 autonomy: scoped
 scope:
   - finance/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -328,8 +324,7 @@ tier: small
 autonomy: scoped
 scope:
   - production/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -369,8 +364,7 @@ tier: small
 autonomy: scoped
 scope:
   - clients/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -411,8 +405,7 @@ tier: mid
 autonomy: scoped
 scope:
   - web/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you
@@ -451,8 +444,7 @@ tier: mid
 autonomy: scoped
 scope:
   - legal/
-allowedTools: Read, Grep, Glob, Write, Edit
-disallowedTools: Bash
+allowedTools: Read, Grep, Glob, Write, Edit, WebSearch, WebFetch, Bash
 ---
 
 Before you answer anything, read \`business.md\` in the repo root. If what you

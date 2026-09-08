@@ -6,9 +6,10 @@ import { join } from "node:path";
 
 import { parseFrontmatter, asList } from "../src/agents/frontmatter.js";
 import { parseRole } from "../src/agents/registry.js";
-import { inScope, checkScope, isDestructive, needsApproval, EscalationStore } from "../src/gate/policy.js";
+import { inScope, checkScope, isDestructive, needsApproval, canReportDone, EscalationStore } from "../src/gate/policy.js";
 import { evaluateBreaker, applyObservation, DEFAULT_BREAKER } from "../src/gate/breaker.js";
 import { Ledger, weigh, demote } from "../src/budget/ledger.js";
+import { spokenDone } from "../src/orchestrator/scheduler.js";
 import { parsePlan } from "../src/orchestrator/planner.js";
 import { parseClaudeResult, parseCodexStream, ClaudeDriver, CodexDriver, permissionModeFor, isLostSession } from "../src/runner/driver.js";
 import { startupFailure } from "../src/runner/types.js";
@@ -760,5 +761,34 @@ describe("a turn that never started", () => {
     assert.equal(result.ok, false);
     assert.equal(result.sessionId, undefined);
     assert.match(result.error ?? "", /providers\.claude\.bin/);
+  });
+});
+
+describe("a desk that cannot say it is done", () => {
+  const tools = (allowed: string[], denied: string[] = []) => ({ allowedTools: allowed, disallowedTools: denied });
+
+  test("Bash denied means no task of theirs can ever complete", () => {
+    assert.equal(canReportDone(tools(["Read", "Write"], ["Bash"])), false);
+    assert.equal(canReportDone(tools(["Read", "Write"])), false, "an allowlist without Bash is just as final");
+    assert.equal(canReportDone(tools([], ["Bash(rm *)"])), false);
+  });
+
+  test("the usual shapes can", () => {
+    assert.equal(canReportDone(tools([])), true, "no allowlist means the CLI default, which has Bash");
+    assert.equal(canReportDone(tools(["Read", "Bash"])), true);
+    assert.equal(canReportDone(tools(["Bash(office *)"])), true);
+  });
+});
+
+describe("saying you are done without a shell", () => {
+  test("the spoken marker is read out of the reply", () => {
+    assert.equal(spokenDone("Wrote the file.\n\nOFFICE-DONE: priced the base package at 400"), "priced the base package at 400");
+    assert.equal(spokenDone("**OFFICE-DONE:** set pricing"), "set pricing");
+  });
+
+  test("talking about finishing is not finishing", () => {
+    assert.equal(spokenDone("I am done with this task."), null);
+    assert.equal(spokenDone("I will run OFFICE-DONE when the file is written"), null, "only at the start of a line");
+    assert.equal(spokenDone(""), null);
   });
 });

@@ -5,6 +5,31 @@ import type { Office } from "../office.js";
 import type { Provider, Task } from "../types.js";
 import { enabledProviders } from "../config.js";
 import { runTurn, type TurnOutcome } from "./turn.js";
+import { canReportDone } from "../gate/policy.js";
+
+/**
+ * The completion signal an agent can give without a shell.
+ *
+ * `office done` stays the real protocol -- it carries the task id and survives a
+ * chatty final message. But completion is the one thing that must never be
+ * missed: a desk that finished and could not say so has its work thrown away
+ * and redone at full price, up to the attempt ceiling, and from the outside the
+ * floor just looks idle. So there is a second way to say it that needs nothing
+ * but words.
+ */
+export const DONE_LINE = "OFFICE-DONE:";
+
+/**
+ * A completion stated in the reply, when the command was not run.
+ *
+ * Anchored to the start of a line so that talking about finishing is not
+ * finishing, and tolerant of the markdown a model wraps around a label it is
+ * trying to make prominent.
+ */
+export function spokenDone(text: string): string | null {
+  const summary = /^[*_`\s]*OFFICE-DONE:[*_`\s]*(.+)$/m.exec(text)?.[1]?.trim();
+  return summary ? summary.replace(/[*_`]+$/, "").trim() || null : null;
+}
 
 export interface SchedulerEvent {
   type: "start" | "turn" | "done" | "blocked" | "stalled" | "budget";
@@ -126,6 +151,22 @@ export class Scheduler {
   }
 
   private async runOne(task: Task, maxAttempts: number, emit: (e: SchedulerEvent) => void): Promise<{ task: Task; ran: boolean; completed: boolean; blockedBy?: string } & Partial<TurnOutcome>> {
+    // Checked before spawning, because the failure it catches is invisible from
+    // the outside: the desk does the work, cannot run `office done`, and the
+    // task looks unfinished. Left alone that is eight identical turns and eight
+    // times the bill for one file.
+    const role = this.office.role(task.assignee);
+    if (!canReportDone(role)) {
+      task.state = "failed";
+      task.finishedAt = nowIso();
+      task.lastError =
+        `${task.assignee} has no Bash tool, so it cannot run \`office done\` and no task of its can ever complete. ` +
+        `Add Bash to allowedTools in office/agents/${task.assignee}.md, or remove it from disallowedTools.`;
+      await this.office.upsertTask(task);
+      emit({ type: "blocked", agent: task.assignee, taskId: task.id, message: task.lastError });
+      return { task, ran: false, completed: false, blockedBy: task.lastError, breakerStage: 0, touchedFiles: [] };
+    }
+
     task.state = "running";
     task.startedAt ??= nowIso();
     task.attempts += 1;
@@ -142,7 +183,7 @@ export class Scheduler {
       return { ...outcome, task, ran: false, completed: false, blockedBy: outcome.blockedBy };
     }
 
-    const marker = await this.takeDoneMarker(task);
+    const marker = (await this.takeDoneMarker(task)) ?? spokenDone(outcome.result?.text ?? "");
     if (marker) {
       task.state = "done";
       task.finishedAt = nowIso();
@@ -232,11 +273,17 @@ export class Scheduler {
   private instructionFor(task: Task): string {
     return (
       `${task.instruction}\n\n` +
+      `Talk to colleagues with \`office mail <agent> "<subject>" "<body>"\`. That is ` +
+      `the only channel that reaches them; anything else goes nowhere.\n\n` +
       `When this task is finished, run:\n\n` +
       `    office done "<one sentence on what you changed and why>"\n\n` +
-      `The office does not consider the task complete until you do. If you cannot ` +
-      `finish it, run \`office escalate\` with what is in the way instead of ` +
-      `leaving it half-done.`
+      `If that command is unavailable to you, end your reply with a line reading ` +
+      `${DONE_LINE} followed by the same sentence. Finishing the work and not ` +
+      `saying so is the one failure that costs the most: the office cannot see ` +
+      `your files, only your signal, and without it this task runs again from ` +
+      `scratch and bills again for what you already did.\n\n` +
+      `If you cannot finish it, run \`office escalate\` with what is in the way ` +
+      `instead of leaving it half-done.`
     );
   }
 
