@@ -14,9 +14,15 @@ The business is early: no roster of regulars yet. The constraint is booked
 shoots, not brand, not polish. Work that does not end with a paying shoot on
 the calendar is work that waits.
 
-- Business name: **BLANK**
-- Home base — the neighbourhood shoots are measured from: **BLANK**
-- Website / portfolio: **BLANK**
+- Business name: **South Shore Media**
+- Owner: **Paul Belfand**
+- Home base: **Merrick, NY** — South Shore, Nassau County, Long Island.
+  (Spelling taken from how Paul said it. Correct this line if it is wrong,
+  because every distance decision below is measured from it.)
+- Website / portfolio: **none live yet.** Paul is finishing one and will deploy
+  it on Vercel; one more photo to upload. Until the URL exists, nothing we send
+  may link to a portfolio — send sample images directly instead, and June owns
+  getting the site up as the thing that unblocks Marco.
 - Booking contact, the one actually answered: **BLANK**
 
 ## Who does what
@@ -75,8 +81,27 @@ Revenue grows in this order: first shoots booked, then the same clients booking
 again, then a higher average job. A broker who calls for every listing is worth
 many one-off homeowners.
 
-- What is included in a shoot — photo count, size limit, travel: **BLANK**
-- Turnaround Paul can actually hold, given he edits himself: **BLANK**
+**Services today: stills only.** Interior and exterior photographs of the
+house. No twilight, no drone, no video, no floor plans — do not offer or price
+them.
+
+**What a shoot covers:** the whole house as a buyer would walk it — living
+room, kitchen, every bedroom, the bathrooms, and the exterior. Not a selective
+set of angles.
+
+**Turnaround** — the word means one thing: how long between Paul photographing
+the house and the agent having the finished, edited photos in hand. It is the
+promise clients care about most, because a listing goes live on a date and
+photos that arrive after it are worthless.
+
+Paul has not set one, and should not guess. What constrains it here: he edits
+every image himself, around school. So the honest promise is built from when he
+can actually sit down and edit, not from what sounds competitive.
+
+- Turnaround Paul promises: **BLANK — Kaya to propose one Paul can always hit,
+  based on the hours below, then Paul confirms it.** Until then, no desk states
+  a delivery time to a client.
+- Photo count included, house-size limit: **BLANK**
 
 ## Who the clients are
 
@@ -102,7 +127,12 @@ changes:
   agents whose listings are across town, Dana does not offer a slot that needs a
   car Paul may not have, and nobody quotes travel we cannot do.
 - Density beats reach. A dozen agents working the same few neighbourhoods is a
-  better target list than a hundred spread across the metro.
+  better target list than a hundred spread across the metro. From Merrick that
+  means the immediately adjacent South Shore towns — Bellmore, Freeport,
+  Wantagh, Baldwin, and the like — plus anything on the Babylon branch of the
+  LIRR, which is walkable-to-station work rather than driving work. Marco
+  should confirm with Paul which of those he can actually reach before building
+  a list around them.
 - If a job needs a car, it needs confirming with Paul first. Do not assume.
 
 The rest:
@@ -123,7 +153,24 @@ The rest:
 - **Nothing is claimed that has not been checked.** Rates, legal terms, and
   platform rules get verified or flagged, never guessed.
 
-- Gear owned, and what would need renting — drone included: **BLANK**
-- Days or hours Paul cannot work: **BLANK**
+**When Paul can actually shoot.** He is in school, so this is narrow and it is
+the real limit on how many jobs exist:
+
+- **Thursday and Friday, from about 1:40pm, and he must be finished and away
+  by 7:30pm.** That is the reliable window.
+- School days otherwise: assume no.
+- Weekends: not stated. Dana should ask before assuming either way — it is
+  probably the largest untapped block of shooting time in the week.
+
+Two things follow from that window and every desk should act on them:
+
+- **It shrinks in winter.** A 7:30pm finish is generous in June and impossible
+  in December, when usable daylight on Long Island is gone well before it.
+  Exteriors have to be earlier in the window as the year goes on.
+- **Editing happens after 7:30pm, or the next day.** Paul shoots and edits, so
+  the shoot window and the edit window compete for the same evening. Any
+  turnaround promise is built from this, not from what competitors advertise.
+
+- Gear owned: **BLANK**
 - Money available to spend right now: **BLANK**
 - Already tried, did not work: **BLANK**
