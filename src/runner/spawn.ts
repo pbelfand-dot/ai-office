@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { resolveBin } from "./resolve.js";
 
 export interface SpawnResult {
   code: number | null;
@@ -18,7 +19,7 @@ export interface SpawnResult {
  */
 export function runProcess(bin: string, args: string[], opts: { cwd: string; env?: Record<string, string>; timeoutMs: number }): Promise<SpawnResult> {
   return new Promise((resolve) => {
-    const child = spawn(bin, args, {
+    const child = spawn(resolveBin(bin), args, {
       cwd: opts.cwd,
       env: { ...process.env, ...opts.env },
       stdio: ["ignore", "pipe", "pipe"],

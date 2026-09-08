@@ -12,6 +12,7 @@ import { Ledger, weigh, demote } from "../src/budget/ledger.js";
 import { parsePlan } from "../src/orchestrator/planner.js";
 import { parseClaudeResult, parseCodexStream, ClaudeDriver, CodexDriver, permissionModeFor, isLostSession } from "../src/runner/driver.js";
 import { startupFailure } from "../src/runner/types.js";
+import { resolveBin } from "../src/runner/resolve.js";
 import { parseJournal, MemoryStore } from "../src/memory/store.js";
 import { MemoryIndex } from "../src/memory/search.js";
 import { Mailbox } from "../src/mail/mailbox.js";
@@ -725,5 +726,22 @@ describe("a CLI that will not start", () => {
 
   test("any other spawn failure is reported as-is, not guessed at", () => {
     assert.equal(startupFailure("codex", "codex", "EACCES permission denied"), "could not start codex: EACCES permission denied");
+  });
+});
+
+describe("finding the CLI", () => {
+  test("a path is taken at its word", () => {
+    assert.equal(resolveBin("/opt/custom/claude"), "/opt/custom/claude");
+    assert.equal(resolveBin("./claude"), "./claude");
+  });
+
+  test("a bare name is resolved against PATH", () => {
+    const resolved = resolveBin("node");
+    assert.ok(resolved.startsWith("/"), `expected an absolute path, got ${resolved}`);
+    assert.ok(resolved.endsWith("/node"));
+  });
+
+  test("a name that is nowhere is returned unchanged, so spawn reports it", () => {
+    assert.equal(resolveBin("definitely-not-installed-xyz"), "definitely-not-installed-xyz");
   });
 });
