@@ -151,7 +151,19 @@ export async function serve(opts: ServeOptions): Promise<{ url: string; close: (
   const heartbeat = setInterval(() => broadcast(clients, "ping"), 25_000);
   heartbeat.unref();
 
-  await new Promise<void>((resolve) => server.listen(opts.port, opts.host, resolve));
+  // Without this, a port that is already taken exits through Node's unhandled
+  // 'error' event: a stack trace ending in EADDRINUSE, which says nothing about
+  // the likely cause -- an office you already have open in another terminal.
+  await new Promise<void>((resolve, reject) => {
+    server.once("error", (err: NodeJS.ErrnoException) => {
+      clearInterval(heartbeat);
+      for (const w of watchers) w.close();
+      reject(err.code === "EADDRINUSE"
+        ? new Error(`port ${opts.port} is already in use -- an office may already be serving there. Open http://${opts.host}:${opts.port}, or pass --port with a free one.`)
+        : err);
+    });
+    server.listen(opts.port, opts.host, resolve);
+  });
   const address = server.address();
   const port = typeof address === "object" && address ? address.port : opts.port;
 

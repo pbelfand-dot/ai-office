@@ -8,6 +8,7 @@ import { join } from "node:path";
 
 import { Office } from "../src/office.js";
 import { say } from "../src/chat/session.js";
+import { serve } from "../src/server/serve.js";
 import { mentionsIn, parseRouting } from "../src/chat/router.js";
 import { FakeDriver, type TurnRequest } from "../src/runner/driver.js";
 import { saveConfig, defaultConfig } from "../src/config.js";
@@ -170,5 +171,20 @@ describe("the channel", () => {
     const history = await office.chat.history("floor");
     assert.equal(history.length, 2);
     assert.deepEqual(history.map((m) => m.body).sort(), ["first", "second"]);
+  });
+});
+
+describe("serving the room", () => {
+  test("a port already in use is a sentence, not a stack trace", async () => {
+    const root = await makeFloor();
+    const first = await serve({ root, port: 0, host: "127.0.0.1" });
+    try {
+      await assert.rejects(
+        serve({ root, port: Number(new URL(first.url).port), host: "127.0.0.1" }),
+        /already in use/,
+      );
+    } finally {
+      await first.close();
+    }
   });
 });
