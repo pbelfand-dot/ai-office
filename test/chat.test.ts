@@ -174,6 +174,60 @@ describe("the channel", () => {
   });
 });
 
+describe("an admin who routes in the open", () => {
+  /** A floor whose router is a visible desk, the way the photography floor is. */
+  async function bossFloor(): Promise<string> {
+    const root = await makeFloor();
+    const roles = join(root, "office", "agents");
+    await writeFile(join(roles, "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run the floor.\n", "utf8");
+    await writeFile(join(roles, "rex.md"), "---\nname: Rex\ntitle: Money\ntier: mid\nautonomy: trusted\n---\n\nYou own pricing.\n", "utf8");
+    await saveConfig(join(root, "office.config.json"), { ...defaultConfig("max5x"), driver: "fake", orchestrator: "paul", router: "paul" });
+    return root;
+  }
+
+  test("the admin never routes to itself", async () => {
+    const root = await bossFloor();
+    const driver = new FakeDriver((req) =>
+      req.agent === "paul" ? { text: '{"reply":["paul","ada"],"why":"tried to take it"}' } : { text: "On it." });
+    const { routing } = await say(await Office.open(root, driver), "who owns pricing?");
+    assert.deepEqual(routing.recipients, ["ada"], "paul is the router, not a recipient");
+  });
+
+  test("the admin speaks only when the decision needs saying", async () => {
+    const root = await bossFloor();
+    const spoken = await say(
+      await Office.open(root, new FakeDriver((req) =>
+        req.agent === "paul" ? { text: '{"reply":["ada"],"why":"hers","say":"Ada, quote the twilight package."}' } : { text: "Quoted." })),
+      "client wants a price",
+    );
+    assert.deepEqual(spoken.replies.map((m) => m.from), ["paul", "ada"], "the assignment lands before the work");
+
+    const quiet = await say(
+      await Office.open(await bossFloor(), new FakeDriver((req) =>
+        req.agent === "paul" ? { text: '{"reply":["ada"],"why":"hers"}' } : { text: "Quoted." })),
+      "client wants a price",
+    );
+    assert.deepEqual(quiet.replies.map((m) => m.from), ["ada"], "no line from paul when he has nothing to decide");
+  });
+
+  test("a nominated desk may jump in, or pass and cost the room nothing", async () => {
+    const root = await bossFloor();
+    const speaks = new FakeDriver((req) =>
+      req.agent === "paul" ? { text: '{"reply":["ada"],"maybe":["rex"],"why":"hers"}' }
+        : req.agent === "rex" ? { text: "That price loses money on drive time." }
+        : { text: "Quoted at 250." });
+    const loud = await say(await Office.open(root, speaks), "what do we charge for the Maple St shoot?");
+    assert.deepEqual(loud.replies.map((m) => m.from), ["ada", "rex"], "the volunteer speaks last");
+
+    const passes = new FakeDriver((req) =>
+      req.agent === "paul" ? { text: '{"reply":["ada"],"maybe":["rex"],"why":"hers"}' }
+        : req.agent === "rex" ? { text: "PASS" }
+        : { text: "Quoted at 250." });
+    const calm = await say(await Office.open(await bossFloor(), passes), "what do we charge?");
+    assert.deepEqual(calm.replies.map((m) => m.from), ["ada"], "a pass never reaches the channel");
+  });
+});
+
 describe("serving the room", () => {
   test("a port already in use is a sentence, not a stack trace", async () => {
     const root = await makeFloor();

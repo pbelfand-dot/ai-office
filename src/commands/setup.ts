@@ -1,8 +1,8 @@
-import { mkdir, writeFile, access } from "node:fs/promises";
+import { mkdir, writeFile, access, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { Paths } from "../paths.js";
 import { defaultConfig, saveConfig, type CodexPlan, type Plan } from "../config.js";
-import { defaultRoles } from "../agents/defaults.js";
+import { floors } from "../agents/floors.js";
 import { bold, dim, green, yellow } from "./format.js";
 
 export interface InitOptions {
@@ -11,6 +11,8 @@ export interface InitOptions {
   codexPlan: CodexPlan;
   force: boolean;
   seed: boolean;
+  /** Which staffing template to hire. See `floors()`. */
+  floor: string;
 }
 
 export async function init(opts: InitOptions): Promise<string> {
@@ -21,24 +23,61 @@ export async function init(opts: InitOptions): Promise<string> {
     throw new Error(`${paths.config} already exists. Pass --force to overwrite it.`);
   }
 
-  const config = defaultConfig(opts.plan, opts.codexPlan);
+  const available = floors(opts.codexPlan !== "none");
+  const floor = available[opts.floor];
+  if (!floor) {
+    throw new Error(`no floor called "${opts.floor}". Available: ${Object.keys(available).join(", ")}`);
+  }
+
+  const config = { ...defaultConfig(opts.plan, opts.codexPlan), router: floor.router, orchestrator: floor.orchestrator };
   await saveConfig(paths.config, config);
   await paths.ensureOffice();
   await mkdir(paths.rolesDir, { recursive: true });
   lines.push(`${green("created")} office.config.json ${dim(`(claude ${opts.plan}${opts.codexPlan === "none" ? "" : `, codex ${opts.codexPlan}`})`)}`);
 
   if (opts.seed) {
-    const roles = defaultRoles(config.providers.codex.enabled ? "codex" : undefined);
-    for (const [id, source] of Object.entries(roles)) {
+    for (const [id, source] of Object.entries(floor.roles)) {
       const path = join(paths.rolesDir, `${id}.md`);
       if (!opts.force && (await exists(path))) {
         lines.push(`${dim("kept")}    office/agents/${id}.md`);
         continue;
       }
       await writeFile(path, source, "utf8");
-      const on = /provider:\s*(\w+)/.exec(source)?.[1] ?? "claude";
-      const hidden = /^hidden:\s*true$/m.test(source);
-      lines.push(`${green("hired")}   ${id} ${dim(`on ${on}${hidden ? ", hidden: routes the chat, never in it" : ""}`)}`);
+      const title = /^title:\s*(.+)$/m.exec(source)?.[1]?.trim() ?? "Staff";
+      const note = /^hidden:\s*true$/m.test(source)
+        ? "hidden: routes the chat, never in it"
+        : id === floor.router ? `${title} -- reads everything, decides who acts` : title;
+      lines.push(`${green("hired")}   ${id} ${dim(note)}`);
+    }
+  }
+
+  // Re-hiring one floor over another leaves the old desks standing: they still
+  // load, still get routed to, still bill. Only ones that are byte-identical to
+  // what we seeded are let go -- anything you have edited is yours, and a tool
+  // that silently deletes your writing is not one you can trust with --force.
+  if (opts.seed) {
+    for (const [name, other] of Object.entries(available)) {
+      if (name === opts.floor) continue;
+      for (const [id, source] of Object.entries(other.roles)) {
+        if (floor.roles[id]) continue;
+        const path = join(paths.rolesDir, `${id}.md`);
+        const current = await read(path);
+        if (current === null) continue;
+        if (current === source) {
+          await rm(path);
+          lines.push(`${dim("let go")}  ${id} ${dim(`(was on the ${name} floor)`)}`);
+        } else {
+          lines.push(`${yellow("kept")}    ${id} ${dim("-- you edited this desk, so it stays. Delete it yourself if it should go.")}`);
+        }
+      }
+    }
+  }
+
+  if (floor.brief) {
+    const path = join(opts.root, floor.brief.path);
+    if (opts.force || !(await exists(path))) {
+      await writeFile(path, floor.brief.body, "utf8");
+      lines.push(`${green("created")} ${floor.brief.path} ${dim("-- fill this in; every desk reads it first")}`);
     }
   }
 
@@ -105,6 +144,10 @@ export async function hire(root: string, id: string, opts: { title?: string; tie
       ? dim("  Starts at autonomy \"ask\": every write comes back to you. Promote it once you have read a few diffs.")
       : yellow(`  Starts at autonomy "${autonomy}". You are trusting an agent you have not watched work yet.`),
   ].join("\n");
+}
+
+async function read(path: string): Promise<string | null> {
+  try { return await readFile(path, "utf8"); } catch { return null; }
 }
 
 async function exists(path: string): Promise<boolean> {

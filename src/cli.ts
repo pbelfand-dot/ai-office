@@ -13,7 +13,7 @@ import type { CodexPlan, Plan } from "./config.js";
 const HELP = `${bold("office")} -- a floor of CLI agents that stops where you tell it to
 
 ${bold("Setting up")}
-  office init [--plan pro|max5x|max20x|api] [--codex-plan none|go|plus|pro|api] [--no-seed] [--force]
+  office init [--floor code|photography] [--plan pro|max5x|max20x|api] [--codex-plan none|go|plus|pro|api] [--no-seed] [--force]
   office hire <agent> [--title T] [--provider claude|codex] [--tier small|mid|large] [--autonomy ask|scoped|trusted] [--scope src/]
 
 ${bold("Talking")}
@@ -66,12 +66,13 @@ async function main(argv: string[]): Promise<number> {
         "codex-plan": { type: "string", default: "none" },
         force: { type: "boolean", default: false },
         seed: { type: "boolean", default: true },
+        floor: { type: "string", default: "code" },
       }, allowPositionals: false });
       const plan = values.plan as Plan;
       const codexPlan = values["codex-plan"] as CodexPlan;
       if (!["pro", "max5x", "max20x", "api"].includes(plan)) throw new Error(`unknown plan "${plan}"`);
       if (!["none", "go", "plus", "pro", "api"].includes(codexPlan)) throw new Error(`unknown codex plan "${codexPlan}"`);
-      return say(await init({ root, plan, codexPlan, force: values.force as boolean, seed: values.seed as boolean }));
+      return say(await init({ root, plan, codexPlan, force: values.force as boolean, seed: values.seed as boolean, floor: values.floor as string }));
     }
 
     case "hire": {
