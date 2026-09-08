@@ -6,6 +6,7 @@ import { MemoryStore } from "./memory/store.js";
 import { MemoryIndex } from "./memory/search.js";
 import { Mailbox } from "./mail/mailbox.js";
 import { Router } from "./mail/router.js";
+import { ChatStore } from "./chat/store.js";
 import { Ledger } from "./budget/ledger.js";
 import { EscalationStore } from "./gate/policy.js";
 import { WorktreeManager } from "./workspace/worktree.js";
@@ -20,6 +21,7 @@ export class Office {
   readonly index: MemoryIndex;
   readonly mail: Mailbox;
   readonly router: Router;
+  readonly chat: ChatStore;
   readonly ledger: Ledger;
   readonly escalations: EscalationStore;
   readonly worktrees: WorktreeManager;
@@ -33,6 +35,7 @@ export class Office {
     this.index = new MemoryIndex(this.paths, this.memory);
     this.mail = new Mailbox(this.paths);
     this.router = new Router(this.paths);
+    this.chat = new ChatStore(this.paths);
     this.ledger = new Ledger(this.paths.ledger, config);
     this.escalations = new EscalationStore(this.paths);
     this.worktrees = new WorktreeManager(resolve(root, config.repo), this.paths);
@@ -75,8 +78,13 @@ export class Office {
     return role;
   }
 
+  /**
+   * The desks on the floor: everyone the planner can assign to, mail can reach,
+   * and the chat can see. Hidden roles -- the router -- are staff and are
+   * addressed by id where they are needed, never listed as colleagues.
+   */
   agentIds(): string[] {
-    return [...this.roles.keys()];
+    return [...this.roles.values()].filter((role) => !role.hidden).map((role) => role.id);
   }
 
   async state(id: string): Promise<AgentState> {

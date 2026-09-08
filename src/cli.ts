@@ -4,6 +4,7 @@ import { Office } from "./office.js";
 import { init, hire } from "./commands/setup.js";
 import { floor, roster, budget, providers } from "./commands/status.js";
 import { brief, run, ask, tasks } from "./commands/work.js";
+import { chat } from "./commands/chat.js";
 import { callerOf, mail, inbox, remember, recall, escalate, done, revive, diff } from "./commands/agent.js";
 import { approvals, decide } from "./commands/gate.js";
 import { bold, dim, red } from "./commands/format.js";
@@ -14,6 +15,10 @@ const HELP = `${bold("office")} -- a floor of CLI agents that stops where you te
 ${bold("Setting up")}
   office init [--plan pro|max5x|max20x|api] [--codex-plan none|go|plus|pro|api] [--no-seed] [--force]
   office hire <agent> [--title T] [--provider claude|codex] [--tier small|mid|large] [--autonomy ask|scoped|trusted] [--scope src/]
+
+${bold("Talking")}
+  office chat "<what you want to say>" [--channel floor]        the floor answers; the switchboard picks who
+  office chat [--limit N]                                       read the channel
 
 ${bold("Working")}
   office brief "<what you want done>" [--run] [--max-turns N]   split a brief into assigned tasks
@@ -96,6 +101,18 @@ async function main(argv: string[]): Promise<number> {
     case "budget": {
       const { values } = parseArgs({ args: rest, options: { calibrate: { type: "boolean", default: false } } });
       return say(await budget(await open(), values.calibrate as boolean));
+    }
+
+    case "chat": {
+      const { values, positionals } = parseArgs({ args: rest, options: {
+        channel: { type: "string" },
+        limit: { type: "string", default: "20" },
+      }, allowPositionals: true });
+      const message = positionals.join(" ").trim();
+      return say(await chat(await open(), message || undefined, {
+        channel: values.channel as string | undefined,
+        limit: Number(values.limit),
+      }));
     }
 
     case "brief": {

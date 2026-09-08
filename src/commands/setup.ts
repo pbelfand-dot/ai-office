@@ -37,7 +37,8 @@ export async function init(opts: InitOptions): Promise<string> {
       }
       await writeFile(path, source, "utf8");
       const on = /provider:\s*(\w+)/.exec(source)?.[1] ?? "claude";
-      lines.push(`${green("hired")}   ${id} ${dim(`on ${on}`)}`);
+      const hidden = /^hidden:\s*true$/m.test(source);
+      lines.push(`${green("hired")}   ${id} ${dim(`on ${on}${hidden ? ", hidden: routes the chat, never in it" : ""}`)}`);
     }
   }
 

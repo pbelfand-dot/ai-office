@@ -65,7 +65,11 @@ header {
 .spend b { color: var(--text); font-variant-numeric: tabular-nums; }
 
 main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; }
-#floor { position: relative; background: var(--floor); overflow: hidden; }
+/* The floor above, the room below. The desks are worth seeing -- who is
+   working, who is stuck -- but the conversation is where the work starts, so
+   it gets the larger half and the floor becomes the status strip over it. */
+#stage { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+#floor { position: relative; background: var(--floor); overflow: hidden; flex: 1 1 40%; }
 #floor::before {
   content: ""; position: absolute; inset: 0; opacity: .5;
   background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
@@ -131,6 +135,21 @@ main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; 
 .envelope rect { fill: var(--accent); }
 .envelope path { stroke: var(--bg); stroke-width: 1; fill: none; }
 
+#chat { flex: 1 1 60%; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
+#log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
+.msg { display: flex; gap: 9px; align-items: flex-start; }
+.msg .avatar { width: 26px; height: 26px; font-size: 10px; background: var(--desk-edge); color: var(--text); }
+.msg.you .avatar { background: var(--accent); color: #0e1116; }
+.msg.system .avatar { background: transparent; border: 1px dashed var(--line); color: var(--faint); }
+.bubble { min-width: 0; max-width: 78ch; }
+.bubble .meta { display: flex; gap: 8px; align-items: baseline; }
+.bubble .meta b { font-size: 11.5px; font-weight: 600; }
+.bubble .meta span { font-size: 10px; color: var(--faint); }
+.bubble .text { font-size: 12.5px; white-space: pre-wrap; word-break: break-word; margin-top: 2px; }
+.msg.system .text { color: var(--muted); font-style: italic; }
+#composer { display: flex; gap: 8px; padding: 10px 14px; border-top: 1px solid var(--line); background: var(--panel); flex: none; }
+#composer input { margin-top: 0; flex: 1; }
+#composer button { flex: none; }
 aside { background: var(--panel); border-left: 1px solid var(--line); overflow-y: auto; padding: 14px; }
 aside h2 {
   font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
@@ -188,7 +207,16 @@ const BODY = `
   <div class="meters" id="meters"></div>
 </header>
 <main>
-  <div id="floor"><svg id="wires"></svg></div>
+  <div id="stage">
+    <div id="floor"><svg id="wires"></svg></div>
+    <section id="chat">
+      <div id="log"></div>
+      <form id="composer">
+        <input type="text" id="say" autocomplete="off" placeholder="Say something to the floor. @name if you already know whose it is.">
+        <button type="submit">Send</button>
+      </form>
+    </section>
+  </div>
   <aside>
     <section id="escsec">
       <h2>Waiting on you</h2>
@@ -515,6 +543,43 @@ function renderPanel() {
   });
 }
 
+function nameOf(id) {
+  if (id === "human") return "You";
+  if (id === "system") return "office";
+  var found = null;
+  S.desks.forEach(function (d) { if (d.id === id) found = d.name; });
+  return found || id;
+}
+
+/* Scroll is only forced when you were already at the bottom. Yanking the log
+   down while someone is reading three messages back is how a chat UI loses an
+   argument you were in the middle of. */
+function renderChat() {
+  var log = document.getElementById("log");
+  var pinned = log.scrollHeight - log.scrollTop - log.clientHeight < 60;
+  log.textContent = "";
+
+  if (!S.chat.length) {
+    log.appendChild(el("div", "empty", "Nobody has said anything yet. Ask the room something."));
+  }
+
+  S.chat.forEach(function (m) {
+    var kind = m.from === "human" ? "you" : m.from === "system" ? "system" : "agent";
+    var row = el("div", "msg " + kind);
+    row.appendChild(el("div", "avatar", initials(nameOf(m.from))));
+    var bubble = el("div", "bubble");
+    var meta = el("div", "meta");
+    meta.appendChild(el("b", null, nameOf(m.from)));
+    meta.appendChild(el("span", null, ago(m.at)));
+    bubble.appendChild(meta);
+    bubble.appendChild(el("div", "text", m.body));
+    row.appendChild(bubble);
+    log.appendChild(row);
+  });
+
+  if (pinned) log.scrollTop = log.scrollHeight;
+}
+
 function renderBurn() {
   var host = document.getElementById("burn");
   host.textContent = "";
@@ -566,6 +631,7 @@ function render() {
   renderDesks();
   remeasure();
   renderEscalations();
+  renderChat();
   renderPanel();
   renderBurn();
   S.mail.forEach(function (m) {
@@ -592,6 +658,21 @@ function setLive(text) {
 document.querySelectorAll(".tab").forEach(function (t) {
   t.onclick = function () { tab = t.dataset.tab; renderPanel(); };
 });
+
+/* The message is posted and the replies are still being written when this
+   returns, so there is nothing to await -- the stream brings each one in. */
+document.getElementById("composer").onsubmit = function (e) {
+  e.preventDefault();
+  var input = document.getElementById("say");
+  var text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  fetch("/api/chat", {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ body: text })
+  }).then(refresh).catch(function () { input.value = text; });
+};
 window.addEventListener("resize", function () { if (S) { layout(); renderDesks(); remeasure(); renderBurn(); } });
 
 var es = new EventSource("/api/stream");

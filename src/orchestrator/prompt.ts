@@ -35,12 +35,38 @@ Two rules that are not negotiable:
 2. If you are blocked, say so and escalate. Do not spin. A turn that repeats
    your last turn will be caught and your desk will be shut down.`;
 
+/**
+ * What replaces the protocol when the turn is a conversation.
+ *
+ * The work protocol would be a lie in the channel: a chat turn has no shell, so
+ * every command it lists is unavailable, and an agent told to run `office done`
+ * on a message it cannot answer will spend the turn trying.
+ */
+export const CHAT_PROTOCOL = `## How this room works
+
+You are in the office group chat, with the human and the rest of the floor.
+Everyone here reads everything you write.
+
+- Reply as yourself, in your own voice, in a few sentences. This is a message,
+  not a memo. If your answer needs headings, what it really needs is to become
+  a task.
+- You are read-only here: you can look at the repo, you cannot change it, and
+  none of the office commands work in this turn. When the room lands on work
+  that has to happen, say so plainly -- it becomes a task through
+  \`office brief\`, not through you starting on it.
+- Speak to what you own or actually know. "That is Ada's call" is a useful
+  message; a confident guess about someone else's area is not.
+- Do not restate what has already been said above you. Add something, disagree,
+  or keep it to a line.`;
+
 export interface PromptContext {
   role: Role;
   memoryBrief: string;
   inbox: Message[];
   steer?: string;
   budgetNote?: string;
+  /** A conversation turn, which runs under a different protocol and no shell. */
+  chat?: boolean;
 }
 
 export function buildSystemPrompt(ctx: PromptContext): string {
@@ -48,7 +74,7 @@ export function buildSystemPrompt(ctx: PromptContext): string {
   const parts: string[] = [
     `# You are ${role.name}, ${role.title}`,
     role.briefing,
-    PROTOCOL,
+    ctx.chat ? CHAT_PROTOCOL : PROTOCOL,
   ];
 
   if (role.scope.length) {

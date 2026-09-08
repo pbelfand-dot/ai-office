@@ -77,16 +77,53 @@ Putting review on the other provider is not load balancing. A reviewer running a
 different model than the implementer catches things a second pass by the same
 model does not, and you were paying for it either way.
 
+## The room
+
+You talk to the floor in one channel, the way you would talk to a team, and a
+hidden desk decides who it was actually for.
+
+```
+office chat "the pricing page feels off — are we sure about the annual tier?"
+```
+
+- **The switchboard.** A hidden desk on the cheapest tier reads your message
+  against the roster and picks who answers. It is not in the room and nobody
+  there knows it exists. It is graded on restraint: one desk is the normal
+  answer, and an empty list — small talk, acknowledgements, anything already
+  settled — is a correct one. That restraint is the whole point. A floor where
+  every message pages every agent is a floor that spends four turns to answer
+  one question.
+- **`@name` beats the switchboard.** When you already know whose it is, say so
+  and no routing turn is paid for at all.
+- **Replies come one at a time**, each handed the channel as it stands, so the
+  second desk answers the first instead of talking over it.
+- **Chat is talk, not work.** A chat turn is read-only, runs on its own
+  conversation thread, and is capped a tier below what the desk builds with.
+  Nothing in the channel edits the repo: when the room lands on something real
+  it becomes a task through `office brief`, and that still goes through
+  worktrees, the ledger, and the gate exactly as before.
+- **Silence is never a broken agent.** A desk that cannot answer — spent
+  budget, parked breaker, a CLI that fell over — says so in the channel.
+
+Every one of those turns is on the same ledger as the work, because it is the
+same allowance. Talking is not free, and the office does not pretend it is:
+`chat.maxTier` in `office.config.json` is the dial for how much of the budget
+the conversation may spend.
+
 ## The floor
 
-`office serve` opens a live view at `http://127.0.0.1:4319`. Desks arranged on a
-floor, an envelope flying between two of them when one agent mails another, and
-the budget meters across the top where you cannot miss them.
+`office serve` opens a live view at `http://127.0.0.1:4319`: the channel with a
+composer, the desks on the floor above it, an envelope flying between two of
+them when one agent mails another, and the budget meters across the top where
+you cannot miss them.
 
 It is a dashboard, not decoration. Nine terminals is an unreadable interface;
 nine desks where you can see at a glance who is blocked, who got demoted a tier,
 and how much of the week is gone is a readable one. What it shows:
 
+- **The channel.** Everything said in the room, live, with a box to say the next
+  thing. Replies stream in as each desk finishes; the log only auto-scrolls when
+  you were already at the bottom.
 - **Desks.** Status by colour, the task on the monitor, the tier actually in use
   (amber when the governor demoted it), unread mail as a badge, a red chip when
   the circuit breaker is engaged.
@@ -217,6 +254,8 @@ office floor                 # who is on what, and what is left of the budget
 | `office init [--plan ...] [--codex-plan none\|go\|plus\|pro]` | Write config, hire a starting floor |
 | `office hire <agent> [--provider] [--tier] [--autonomy] [--scope]` | Add a desk |
 | `office providers` | The subscriptions behind the floor, and their caps |
+| `office chat "<text>" [--channel C]` | Say something to the room; the switchboard picks who answers |
+| `office chat [--limit N]` | Read the channel |
 | `office brief "<text>" [--run]` | Split a brief into assigned tasks |
 | `office run [--max-turns N]` | Work the queue |
 | `office ask <agent> "<instruction>"` | One instruction, one agent, no planner |

@@ -3,6 +3,7 @@ import { watch, type FSWatcher } from "node:fs";
 import { Office } from "../office.js";
 import { snapshot } from "./snapshot.js";
 import { decide } from "../commands/gate.js";
+import { say } from "../chat/session.js";
 import { page } from "./page.js";
 
 export interface ServeOptions {
@@ -24,6 +25,8 @@ export interface ServeOptions {
 export async function serve(opts: ServeOptions): Promise<{ url: string; close: () => Promise<void> }> {
   const office = await Office.open(opts.root);
   const clients = new Set<ServerResponse>();
+  /** Chat turns still running after their request answered; close() waits. */
+  const inFlight = new Set<Promise<unknown>>();
 
   const server = createServer((req, res) => {
     void handle(req, res).catch((err: unknown) => {
@@ -87,6 +90,30 @@ export async function serve(opts: ServeOptions): Promise<{ url: string; close: (
       return send(res, 200, { agent, facts, journal: journal.slice(-25).reverse(), inbox });
     }
 
+    // The reply turns are not awaited here. A desk can take a minute to answer,
+    // and a chat that only paints when everyone has finished is not a chat --
+    // the message lands immediately, each reply is broadcast as it arrives, and
+    // the page redraws off the same stream that carries everything else.
+    if (url.pathname === "/api/chat" && req.method === "POST") {
+      const body = await readBody(req);
+      const text = typeof body.body === "string" ? body.body.trim() : "";
+      if (!text) return send(res, 400, { error: "a chat message needs something in it" });
+
+      const talking = say(await Office.open(opts.root), text, { channel: typeof body.channel === "string" ? body.channel : undefined })
+        .catch((err: unknown) => {
+          broadcast(clients, "change");
+          process.stderr.write(`chat failed: ${err instanceof Error ? err.message : String(err)}\n`);
+        })
+        .finally(() => {
+          inFlight.delete(talking);
+          broadcast(clients, "change");
+        });
+      inFlight.add(talking);
+
+      broadcast(clients, "change");
+      return send(res, 202, { ok: true });
+    }
+
     const gate = /^\/api\/escalations\/([\w.-]+)\/(approve|deny)$/.exec(url.pathname);
     if (gate && req.method === "POST") {
       const body = await readBody(req);
@@ -134,6 +161,7 @@ export async function serve(opts: ServeOptions): Promise<{ url: string; close: (
       clearInterval(heartbeat);
       for (const w of watchers) w.close();
       for (const client of clients) client.end();
+      await Promise.allSettled([...inFlight]);
       await new Promise<void>((resolve) => server.close(() => resolve()));
     },
   };

@@ -17,6 +17,9 @@ export class Paths {
   get escalations() { return join(this.office, "escalations"); }
   get worktrees() { return join(this.office, "worktrees"); }
   get logs() { return join(this.office, "logs"); }
+  get chatDir() { return join(this.office, "chat"); }
+
+  chat(channel: string) { return join(this.chatDir, `${channel}.jsonl`); }
 
   agent(id: string) { return join(this.office, "agents", id); }
   agentState(id: string) { return join(this.agent(id), "state.json"); }

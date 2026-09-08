@@ -127,6 +127,38 @@ describe("the visual floor", () => {
     assert.equal(ok, 200);
   });
 
+  test("a message posted from the browser lands in the channel and gets an answer", async () => {
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: "@ada what does src/index.ts export?" }),
+    });
+    // 202: the message is stored, the replies are still being written.
+    assert.equal(res.status, 202);
+
+    const office = await Office.open(root, new FakeDriver());
+    const posted = await until(async () => {
+      const history = await office.chat.history("floor");
+      return history.length >= 2 ? history : null;
+    });
+
+    assert.equal(posted[0]?.from, "human");
+    assert.equal(posted[1]?.from, "ada");
+
+    const floor = await (await fetch(`${url}/api/floor`)).json() as Awaited<ReturnType<typeof snapshot>>;
+    assert.equal(floor.channel, "floor");
+    assert.equal(floor.chat.length, 2);
+  });
+
+  test("an empty message is refused rather than paying for a turn", async () => {
+    const res = await fetch(`${url}/api/chat`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ body: "   " }),
+    });
+    assert.equal(res.status, 400);
+  });
+
   test("the diff route refuses an agent who does not exist", async () => {
     assert.equal((await fetch(`${url}/api/diff/kevin`)).status, 404);
     assert.equal((await fetch(`${url}/api/memory/kevin`)).status, 404);
@@ -146,6 +178,17 @@ describe("the visual floor", () => {
     assert.ok(floor.desks.some((d) => d.id === "doc"), "the roster is re-read per request");
   });
 });
+
+/** Poll for a value: a chat POST answers before the replies are written. */
+async function until<T>(read: () => Promise<T | null>, timeoutMs = 5000): Promise<T> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    const value = await read();
+    if (value) return value;
+    if (Date.now() > deadline) throw new Error("timed out waiting for the channel");
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+}
 
 /** Send a hand-written request and return the status line's code. */
 function rawRequest(port: number, request: string): Promise<number> {

@@ -22,7 +22,9 @@ export function callerOf(explicit?: string): string {
 }
 
 export async function mail(office: Office, from: string, to: string, subject: string, body: string, taskId?: string): Promise<string> {
-  if (!office.roles.has(to)) {
+  // agentIds, not roles: a hidden desk has no inbox anyone should be writing to,
+  // and mail addressed to one would be delivered nowhere and dropped later.
+  if (!office.agentIds().includes(to)) {
     throw new Error(`there is no agent named "${to}". On the floor: ${office.agentIds().join(", ")}`);
   }
   if (to === from) throw new Error("an agent cannot mail itself; use `office remember` for notes to self");

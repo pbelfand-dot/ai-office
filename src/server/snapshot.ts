@@ -1,7 +1,7 @@
 import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { Office } from "../office.js";
-import type { Escalation, Message, Provider, Task } from "../types.js";
+import type { ChatMessage, Escalation, Message, Provider, Task } from "../types.js";
 import { weigh, providerOf } from "../budget/ledger.js";
 import { enabledProviders } from "../config.js";
 
@@ -40,6 +40,10 @@ export interface PoolView {
 export interface FloorSnapshot {
   now: string;
   plan: string;
+  /** The channel the dashboard's composer posts to. */
+  channel: string;
+  /** The tail of that channel, oldest first. */
+  chat: ChatMessage[];
   desks: DeskView[];
   /** One per enabled provider. Separate allowances, shown separately. */
   pools: PoolView[];
@@ -53,6 +57,7 @@ export interface FloorSnapshot {
 
 const RECENT_MAIL_MS = 5 * 60_000;
 const MAIL_PER_BOX = 30;
+const CHAT_TAIL = 80;
 
 /**
  * One read of everything the floor knows, shaped for a browser.
@@ -62,10 +67,11 @@ const MAIL_PER_BOX = 30;
  * would drift the moment an agent finished a turn outside this process.
  */
 export async function snapshot(office: Office): Promise<FloorSnapshot> {
-  const [tasks, escalations, ledger] = await Promise.all([
+  const [tasks, escalations, ledger, chat] = await Promise.all([
     office.tasks(),
     office.escalations.list(),
     office.ledger.entries(),
+    office.chat.history(office.config.chat.channel, CHAT_TAIL),
   ]);
 
   const pools: PoolView[] = [];
@@ -128,6 +134,8 @@ export async function snapshot(office: Office): Promise<FloorSnapshot> {
   return {
     now: new Date().toISOString(),
     plan: office.config.plan,
+    channel: office.config.chat.channel,
+    chat,
     desks,
     pools,
     tasks,

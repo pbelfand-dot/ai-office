@@ -23,7 +23,7 @@ const scratch = () => mkdtemp(join(tmpdir(), "office-test-"));
 
 const ROLE: Role = {
   id: "ada", provider: "claude", name: "Ada", title: "Implementation", tier: "mid", autonomy: "scoped",
-  scope: ["src/", "lib/"], allowedTools: [], disallowedTools: [], briefing: "do the thing",
+  hidden: false, scope: ["src/", "lib/"], allowedTools: [], disallowedTools: [], briefing: "do the thing",
 };
 
 describe("frontmatter", () => {

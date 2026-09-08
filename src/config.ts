@@ -54,6 +54,28 @@ export interface OfficeConfig {
   /** "real" spawns the CLIs. "fake" is for tests and dry runs. */
   driver: "real" | "fake";
   orchestrator: string;
+  /** The hidden desk that decides who a chat message is for. */
+  router: string;
+  chat: ChatConfig;
+}
+
+export interface ChatConfig {
+  /** The channel `office chat` and the dashboard talk in by default. */
+  channel: string;
+  /**
+   * Ceiling on a chat reply's tier, whatever the desk runs its work at.
+   *
+   * Chat spends the same allowance as the work does, and a floor that talks
+   * all afternoon on the large tier is a floor with nothing left to build
+   * with. Raise it when the budget can carry it.
+   */
+  maxTier: Tier;
+  /** The router only picks names out of a roster; it never needs more. */
+  routerTier: Tier;
+  /** Chat should feel like chat: a much shorter leash than a work turn. */
+  turnTimeoutMs: number;
+  /** How much of the channel each reply and each routing decision sees. */
+  historyDepth: number;
 }
 
 /** Scaled off the published plan multiples. Hypotheses, not quotas. */
@@ -103,6 +125,8 @@ export function defaultConfig(plan: Plan = "max5x", codexPlan: CodexPlan = "none
     defaults: { provider: "claude", tier: "mid", autonomy: "scoped", turnTimeoutMs: 15 * 60_000 },
     driver: "real",
     orchestrator: "michelle",
+    router: "switchboard",
+    chat: { channel: "floor", maxTier: "mid", routerTier: "small", turnTimeoutMs: 3 * 60_000, historyDepth: 24 },
   };
 }
 
@@ -135,6 +159,7 @@ export async function loadConfig(path: string, plan: Plan = "max5x"): Promise<Of
     ...raw,
     providers,
     defaults: { ...base.defaults, ...raw.defaults, tier: migrateTier(raw.defaults?.tier) ?? base.defaults.tier },
+    chat: { ...base.chat, ...raw.chat },
     driver: raw.driver === "fake" ? "fake" : "real",
   });
 }
@@ -176,6 +201,13 @@ export function validateConfig(config: OfficeConfig): OfficeConfig {
   if (!TIERS.includes(config.defaults.tier)) throw new Error(`unknown default tier ${config.defaults.tier}`);
   if (config.defaults.turnTimeoutMs < 1000) throw new Error("defaults.turnTimeoutMs must be at least 1000");
   if (!config.orchestrator.trim()) throw new Error("orchestrator must name an agent");
+  if (!config.router.trim()) throw new Error("router must name an agent");
+  if (!/^[\w.-]+$/.test(config.chat.channel)) throw new Error(`chat.channel must be a plain name, got "${config.chat.channel}"`);
+  for (const tier of [config.chat.maxTier, config.chat.routerTier]) {
+    if (!TIERS.includes(tier)) throw new Error(`unknown chat tier ${tier}`);
+  }
+  if (config.chat.turnTimeoutMs < 1000) throw new Error("chat.turnTimeoutMs must be at least 1000");
+  if (config.chat.historyDepth < 1) throw new Error("chat.historyDepth must be at least 1");
   return config;
 }
 

@@ -42,6 +42,13 @@ export interface Role {
   disallowedTools: string[];
   /** How much rope: what this agent may do before a human sees it. */
   autonomy: Autonomy;
+  /**
+   * A hidden desk is staff, not a colleague: it never appears on the roster,
+   * the planner never assigns to it, and it is not a participant in the chat.
+   * The router is one, because a group chat with the router in it is a group
+   * chat you have to talk around.
+   */
+  hidden: boolean;
   /** The briefing, i.e. the markdown body of the role file. */
   briefing: string;
 }
@@ -66,6 +73,29 @@ export interface Message {
   taskId?: string;
   sentAt: string;
   readAt?: string;
+}
+
+/** The id every chat message from you carries. Agents use their own. */
+export const HUMAN = "human";
+/** Messages the office writes about itself: a failed reply, a dropped turn. */
+export const SYSTEM = "system";
+
+/**
+ * One line in a channel, readable by everyone on the floor.
+ *
+ * Deliberately not a `Message`. Mail is addressed to one agent and moves
+ * through outbox -> inbox -> archive; a channel line is addressed to the room
+ * and never changes once written, so it is a log, not a queue.
+ */
+export interface ChatMessage {
+  id: string;
+  channel: string;
+  /** An agent id, or HUMAN, or SYSTEM. */
+  from: string;
+  body: string;
+  at: string;
+  /** The message this one answers, so replies group under what prompted them. */
+  replyTo?: string;
 }
 
 export type TaskState = "pending" | "assigned" | "running" | "done" | "failed" | "blocked";
@@ -141,6 +171,12 @@ export interface AgentState {
   status: AgentStatus;
   /** Claude Code session id, so the agent keeps one continuous thread. */
   sessionId?: string;
+  /**
+   * The agent's *conversation* thread, kept apart from its work thread. An
+   * afternoon of chat should not be the context a task starts from, and a
+   * half-finished refactor should not be what it remembers in the channel.
+   */
+  chatSessionId?: string;
   currentTaskId?: string;
   /** Circuit breaker stage: 0 none, 1 steer, 2 constrain, 3 stop. */
   breakerStage: 0 | 1 | 2 | 3;

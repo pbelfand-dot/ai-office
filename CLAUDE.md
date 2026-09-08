@@ -16,6 +16,7 @@ src/
   workspace/           git worktree per agent
   memory/              per-agent journal + facts, BM25 search across the floor
   mail/                file-backed outbox -> router -> inbox
+  chat/                the shared channel: store, hidden router, reply session
   budget/ledger.ts     the governor: one pool per provider, demotion, calibration
   gate/                policy (scope, destructive, spend) and the circuit breaker
   runner/              driver interface, shared spawn, claude.ts, codex.ts, FakeDriver
@@ -80,3 +81,18 @@ rather than mocking git.
   create files; a review pane that hides them is worse than none.
 - The token budgets in `config.ts` are a governor you set, not a quota Anthropic
   publishes. Do not present them as official numbers.
+- A chat turn skips the circuit breaker. The breaker treats a turn that touched
+  no file and sent no mail as a turn going nowhere, which is what every
+  conversation looks like; without the skip, six replies park the desk.
+- `agentIds()` excludes hidden roles and `roles` does not. Hidden desks (the
+  switchboard) still run turns, bill the ledger, and are addressed by id — they
+  are just never colleagues: not on the roster, not assignable, not in the room.
+- Chat replies run sequentially, not in parallel. Each desk is handed the
+  channel as it stands so it answers the one before it, and one turn at a time
+  can never exceed a provider's concurrency cap.
+- `POST /api/chat` answers 202 before the replies exist. The turns finish in the
+  background and each one broadcasts on the same SSE stream; `close()` waits on
+  them. A chat that only paints when everyone has finished is not a chat.
+- `ChatMessage` is not `Message` and should not be merged with it. Mail is a
+  queue with one recipient and a lifecycle; a channel line is a log entry read
+  by the room and never handled.

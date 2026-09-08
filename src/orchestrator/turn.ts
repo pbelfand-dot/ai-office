@@ -1,9 +1,10 @@
 import { nowIso } from "../util.js";
 import type { Office } from "../office.js";
-import type { Task } from "../types.js";
+import type { AgentState, Task, Tier } from "../types.js";
 import { buildSystemPrompt } from "./prompt.js";
-import { applyObservation, evaluateBreaker } from "../gate/breaker.js";
+import { applyObservation, evaluateBreaker, type BreakerDecision } from "../gate/breaker.js";
 import { needsApproval } from "../gate/policy.js";
+import { capTier } from "../budget/ledger.js";
 import type { TurnResult } from "../runner/driver.js";
 
 export interface TurnOutcome {
@@ -16,6 +17,20 @@ export interface TurnOutcome {
   touchedFiles: string[];
 }
 
+export interface TurnOptions {
+  /**
+   * Which of the desk's two threads this turn belongs to. "chat" resumes the
+   * conversation session and is judged differently: see the breaker note below.
+   */
+  thread?: "work" | "chat";
+  /** Ceiling on the tier, whatever the role asks for. */
+  maxTier?: Tier;
+  /** Override the role's tool lists, e.g. to keep a chat turn read-only. */
+  allowedTools?: string[];
+  disallowedTools?: string[];
+  timeoutMs?: number;
+}
+
 /**
  * One agent, one turn.
  *
@@ -24,15 +39,16 @@ export interface TurnOutcome {
  * cannot know what an agent touched until it has touched it -- the worktree is
  * the containment, and the gate decides whether the work leaves it.
  */
-export async function runTurn(office: Office, agentId: string, task: Task | null, instruction: string): Promise<TurnOutcome> {
+export async function runTurn(office: Office, agentId: string, task: Task | null, instruction: string, opts: TurnOptions = {}): Promise<TurnOutcome> {
   const role = office.role(agentId);
   const state = await office.state(agentId);
+  const chat = opts.thread === "chat";
 
   if (state.status === "parked") {
     return { ran: false, blockedBy: `${agentId} is parked by the circuit breaker; run \`office revive ${agentId}\``, breakerStage: 3, touchedFiles: [] };
   }
 
-  const requestedTier = state.tierOverride ?? role.tier;
+  const requestedTier = capTier(state.tierOverride ?? role.tier, opts.maxTier);
   const verdict = await office.ledger.check(role.provider, requestedTier);
   if (!verdict.allow) {
     return { ran: false, blockedBy: verdict.reason, breakerStage: state.breakerStage, touchedFiles: [] };
@@ -40,16 +56,21 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
 
   // Persist "working" before spawning, not after. The agent runs `office done`
   // and `office escalate` from inside its own turn, and both need to know which
-  // task they belong to -- a state written afterwards is written too late.
-  await office.saveState({ ...state, status: "working", currentTaskId: task?.id });
+  // task they belong to -- a state written afterwards is written too late. A
+  // chat turn keeps whatever task the desk was already on: answering a question
+  // in the channel does not mean it stopped working.
+  await office.saveState({ ...state, status: "working", currentTaskId: chat ? state.currentTaskId : task?.id });
 
   const cwd = await office.worktrees.ensure(agentId);
   const before = await office.worktrees.touchedFiles(agentId);
   const outboxBefore = (await office.mail.outbox(agentId)).length;
 
-  const inbox = await office.mail.inbox(agentId, { unreadOnly: true });
+  // Mail is work, and a chat turn cannot answer it: no shell, no `office
+  // inbox`. Showing it would only pull the reply off the subject of the room.
+  const inbox = chat ? [] : await office.mail.inbox(agentId, { unreadOnly: true });
   const systemPrompt = buildSystemPrompt({
     role,
+    chat,
     memoryBrief: await office.memory.brief(agentId),
     inbox,
     steer: state.breakerStage === 1 ? lastSteer(state.recentFingerprints.length) : undefined,
@@ -66,10 +87,10 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
     tier: verdict.tier,
     model: office.modelFor(role.provider, verdict.tier),
     autonomy: role.autonomy,
-    sessionId: state.sessionId,
-    allowedTools: role.allowedTools,
-    disallowedTools: role.disallowedTools,
-    timeoutMs: office.config.defaults.turnTimeoutMs,
+    sessionId: chat ? state.chatSessionId : state.sessionId,
+    allowedTools: opts.allowedTools ?? role.allowedTools,
+    disallowedTools: opts.disallowedTools ?? role.disallowedTools,
+    timeoutMs: opts.timeoutMs ?? office.config.defaults.turnTimeoutMs,
     addDirs: [office.paths.agent(agentId)],
     env: { OFFICE_AGENT: agentId, OFFICE_ROOT: office.root },
   });
@@ -101,8 +122,16 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
     mailSent: Math.max(0, mailSent),
     turnsOnTask: (task?.attempts ?? 0) + 1,
   };
-  const decision = evaluateBreaker(state, observation, requestedTier);
-  const next = applyObservation({ ...state, sessionId: result.sessionId ?? state.sessionId, currentTaskId: task?.id }, observation, decision);
+  // A chat turn is not judged by the breaker. The breaker calls a turn that
+  // touched no file and sent no mail a turn going nowhere, which is exactly
+  // what a conversation looks like -- four replies in the channel would
+  // otherwise park the desk for talking.
+  const decision: BreakerDecision = chat
+    ? { stage: state.breakerStage, reason: "chat turn", changed: false }
+    : evaluateBreaker(state, observation, requestedTier);
+  const next: AgentState = chat
+    ? { ...state, chatSessionId: result.sessionId ?? state.chatSessionId, updatedAt: nowIso() }
+    : applyObservation({ ...state, sessionId: result.sessionId ?? state.sessionId, currentTaskId: task?.id }, observation, decision);
 
   const gate = needsApproval(role, { touchedFiles, costUsd: result.costUsd }, office.config.providers[role.provider].escalateAboveUsdPerTask);
   let escalationId: string | undefined;
@@ -116,13 +145,15 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
     });
     escalationId = escalation.id;
     next.status = "blocked";
+  } else if (chat) {
+    next.status = state.status;
   } else if (decision.stage < 3) {
     next.status = "idle";
   }
 
   await office.saveState(next);
 
-  if (decision.stage >= 2 || gate.required) {
+  if ((!chat && decision.stage >= 2) || gate.required) {
     await office.memory.remember(
       agentId,
       gate.required ? `Turn held for review: ${gate.detail}` : `Circuit breaker at stage ${decision.stage}: ${decision.reason}`,

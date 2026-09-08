@@ -197,6 +197,12 @@ export function demote(tier: Tier): Tier {
   return (TIERS[Math.max(0, i - 1)] ?? tier) as Tier;
 }
 
+/** The cheaper of what was asked for and what the caller will pay for. */
+export function capTier(tier: Tier, max?: Tier): Tier {
+  if (!max) return tier;
+  return TIERS.indexOf(tier) <= TIERS.indexOf(max) ? tier : max;
+}
+
 function pct(n: number): string {
   return `${Math.round(n * 100)}%`;
 }

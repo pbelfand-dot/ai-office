@@ -25,6 +25,8 @@ export function parseRole(id: string, source: string, defaults: { provider: Prov
 
   if (!body.trim()) throw new Error(`role ${id}: the briefing body is empty, so the agent has no instructions`);
 
+  const hidden = data.hidden === "true" || data.hidden === "yes";
+
   const scope = asList(data.scope);
   if (autonomy === "scoped" && scope.length === 0) {
     throw new Error(`role ${id}: autonomy "scoped" needs at least one scope entry, otherwise it is just "trusted" with extra steps`);
@@ -37,6 +39,7 @@ export function parseRole(id: string, source: string, defaults: { provider: Prov
     title: typeof data.title === "string" && data.title ? data.title : "Staff",
     tier,
     autonomy,
+    hidden,
     scope,
     allowedTools: asList(data.allowedTools),
     disallowedTools: asList(data.disallowedTools),
