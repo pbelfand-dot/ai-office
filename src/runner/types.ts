@@ -47,6 +47,24 @@ export interface Driver {
   run(req: TurnRequest): Promise<TurnResult>;
 }
 
+/**
+ * Why the CLI would not start, said in a way you can act on.
+ *
+ * ENOENT is almost never "you have no CLI". It is usually a shell alias or a
+ * function -- `claude` works when you type it and does not exist as a file --
+ * or an install somewhere the login shell adds to PATH and nothing else does.
+ * "spawn claude ENOENT" is accurate and tells you none of that.
+ */
+export function startupFailure(bin: string, provider: Provider, spawnError: string): string {
+  if (!/ENOENT/.test(spawnError)) return `could not start ${bin}: ${spawnError}`;
+  return (
+    `could not start "${bin}": there is no such executable on PATH. A shell alias or ` +
+    `function will not do -- the office spawns the binary itself and never opens a shell. ` +
+    `Run \`type -a ${bin}\`: if it names a real file, put that absolute path in ` +
+    `providers.${provider}.bin in office.config.json. If it names nothing, that CLI is not installed.`
+  );
+}
+
 export function failed(error: string, sessionId: string, model: string, durationMs: number): TurnResult {
   return {
     ok: false, text: "", sessionId, model, costUsd: 0,

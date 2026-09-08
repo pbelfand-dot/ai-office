@@ -11,6 +11,7 @@ import { evaluateBreaker, applyObservation, DEFAULT_BREAKER } from "../src/gate/
 import { Ledger, weigh, demote } from "../src/budget/ledger.js";
 import { parsePlan } from "../src/orchestrator/planner.js";
 import { parseClaudeResult, parseCodexStream, ClaudeDriver, CodexDriver, permissionModeFor, isLostSession } from "../src/runner/driver.js";
+import { startupFailure } from "../src/runner/types.js";
 import { parseJournal, MemoryStore } from "../src/memory/store.js";
 import { MemoryIndex } from "../src/memory/search.js";
 import { Mailbox } from "../src/mail/mailbox.js";
@@ -712,5 +713,17 @@ describe("codex driver", () => {
   test("output with no events at all returns null so the caller reports real stderr", () => {
     assert.equal(parseCodexStream("", undefined, "gpt-x", 1), null);
     assert.equal(parseCodexStream("command not found: codex", undefined, "gpt-x", 1), null);
+  });
+});
+
+describe("a CLI that will not start", () => {
+  test("ENOENT names the config knob instead of the syscall", () => {
+    const message = startupFailure("claude", "claude", "spawn claude ENOENT");
+    assert.match(message, /providers\.claude\.bin/);
+    assert.match(message, /alias/);
+  });
+
+  test("any other spawn failure is reported as-is, not guessed at", () => {
+    assert.equal(startupFailure("codex", "codex", "EACCES permission denied"), "could not start codex: EACCES permission denied");
   });
 });

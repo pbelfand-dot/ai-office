@@ -1,5 +1,5 @@
 import type { Driver, TurnRequest, TurnResult } from "./types.js";
-import { failed } from "./types.js";
+import { failed, startupFailure } from "./types.js";
 import { runProcess } from "./spawn.js";
 
 /**
@@ -48,7 +48,7 @@ export class CodexDriver implements Driver {
     const model = req.model ?? "default";
     const proc = await runProcess(this.bin, this.buildArgs(req), { cwd: req.cwd, env: req.env, timeoutMs: req.timeoutMs });
 
-    if (proc.spawnError) return failed(`could not start ${this.bin}: ${proc.spawnError}`, req.sessionId ?? "", model, Date.now() - started);
+    if (proc.spawnError) return failed(startupFailure(this.bin, "codex", proc.spawnError), req.sessionId ?? "", model, Date.now() - started);
     if (proc.timedOut) return failed(`turn exceeded ${Math.round(req.timeoutMs / 1000)}s and was killed`, req.sessionId ?? "", model, Date.now() - started);
 
     const parsed = parseCodexStream(proc.stdout, req.sessionId, model, Date.now() - started);

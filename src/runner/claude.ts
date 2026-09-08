@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import type { Autonomy } from "../types.js";
 import type { Driver, TurnRequest, TurnResult } from "./types.js";
-import { failed } from "./types.js";
+import { failed, startupFailure } from "./types.js";
 import { runProcess } from "./spawn.js";
 
 /**
@@ -53,7 +53,7 @@ export class ClaudeDriver implements Driver {
     const model = req.model ?? "default";
     const proc = await runProcess(this.bin, args, { cwd: req.cwd, env: req.env, timeoutMs: req.timeoutMs });
 
-    if (proc.spawnError) return failed(`could not start ${this.bin}: ${proc.spawnError}`, sessionId, model, Date.now() - started);
+    if (proc.spawnError) return failed(startupFailure(this.bin, "claude", proc.spawnError), sessionId, model, Date.now() - started);
     if (proc.timedOut) return failed(`turn exceeded ${Math.round(req.timeoutMs / 1000)}s and was killed`, sessionId, model, Date.now() - started);
 
     const parsed = parseClaudeResult(proc.stdout, sessionId, model, Date.now() - started);
