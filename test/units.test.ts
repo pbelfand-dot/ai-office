@@ -10,7 +10,7 @@ import { inScope, checkScope, isDestructive, needsApproval, EscalationStore } fr
 import { evaluateBreaker, applyObservation, DEFAULT_BREAKER } from "../src/gate/breaker.js";
 import { Ledger, weigh, demote } from "../src/budget/ledger.js";
 import { parsePlan } from "../src/orchestrator/planner.js";
-import { parseClaudeResult, parseCodexStream, ClaudeDriver, CodexDriver, permissionModeFor } from "../src/runner/driver.js";
+import { parseClaudeResult, parseCodexStream, ClaudeDriver, CodexDriver, permissionModeFor, isLostSession } from "../src/runner/driver.js";
 import { parseJournal, MemoryStore } from "../src/memory/store.js";
 import { MemoryIndex } from "../src/memory/search.js";
 import { Mailbox } from "../src/mail/mailbox.js";
@@ -370,6 +370,15 @@ describe("claude driver", () => {
     assert.equal(parseClaudeResult("", "f", "mid", 1), null);
   });
 
+  test("a refused --resume is recognised, so the dead session id gets dropped", () => {
+    assert.equal(isLostSession('Error: --resume requires a valid session ID or session title when used with --print.'), true);
+    assert.equal(isLostSession("No conversation found with session ID: abc"), true);
+    // Anything else keeps the thread: losing a good session costs the desk its
+    // context, so this only fires on the CLI's own resume wording.
+    assert.equal(isLostSession("Error: rate limit exceeded"), false);
+    assert.equal(isLostSession("command not found: claude"), false);
+  });
+
   test("resuming passes --resume, a first turn passes --session-id", () => {
     const driver = new ClaudeDriver();
     const base = {
@@ -385,7 +394,13 @@ describe("claude driver", () => {
     assert.ok(resumed.args.includes("--resume"));
     assert.ok(!resumed.args.includes("--session-id"));
     assert.ok(resumed.args.includes("--allowedTools"));
-    assert.equal(resumed.args.at(-1), "p", "the prompt must be the final positional");
+
+    // The prompt rides directly after -p, never at the end: --allowedTools and
+    // --disallowedTools are variadic, so a trailing prompt is read as one more
+    // tool name and the CLI then refuses the turn for having no prompt.
+    assert.deepEqual(resumed.args.slice(0, 2), ["-p", "p"]);
+    const tools = resumed.args.indexOf("--allowedTools");
+    assert.ok(tools > 1 && !resumed.args.slice(tools).includes("p"), "nothing follows the tool lists but flags");
   });
 
   test("never selects bypassPermissions on its own", () => {

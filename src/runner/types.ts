@@ -33,6 +33,13 @@ export interface TurnResult {
   durationMs: number;
   turns: number;
   error?: string;
+  /**
+   * The turn died because the session it was told to resume is gone or was
+   * never valid. The caller should forget the id rather than retry it: every
+   * later turn would fail the same way, and a desk that can never start a turn
+   * is indistinguishable from a broken one.
+   */
+  sessionLost?: boolean;
 }
 
 export interface Driver {

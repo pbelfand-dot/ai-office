@@ -129,9 +129,13 @@ export async function runTurn(office: Office, agentId: string, task: Task | null
   const decision: BreakerDecision = chat
     ? { stage: state.breakerStage, reason: "chat turn", changed: false }
     : evaluateBreaker(state, observation, requestedTier);
+  // A session the CLI will not resume is worse than no session: kept, it fails
+  // every future turn on this desk the same way, and the desk looks dead.
+  // Forgetting it costs the thread and nothing else.
+  const thread = (stored?: string) => (result.sessionLost ? undefined : result.sessionId ?? stored);
   const next: AgentState = chat
-    ? { ...state, chatSessionId: result.sessionId ?? state.chatSessionId, updatedAt: nowIso() }
-    : applyObservation({ ...state, sessionId: result.sessionId ?? state.sessionId, currentTaskId: task?.id }, observation, decision);
+    ? { ...state, chatSessionId: thread(state.chatSessionId), updatedAt: nowIso() }
+    : applyObservation({ ...state, sessionId: thread(state.sessionId), currentTaskId: task?.id }, observation, decision);
 
   const gate = needsApproval(role, { touchedFiles, costUsd: result.costUsd }, office.config.providers[role.provider].escalateAboveUsdPerTask);
   let escalationId: string | undefined;

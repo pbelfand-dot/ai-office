@@ -27,8 +27,12 @@ export class ClaudeDriver implements Driver {
 
   buildArgs(req: TurnRequest): { args: string[]; sessionId: string } {
     const sessionId = req.sessionId ?? randomUUID();
+    // The prompt goes here, immediately after -p, and not at the end.
+    // --allowedTools and --disallowedTools are variadic: put anything after
+    // them and the CLI reads it as one more tool name, then refuses the turn
+    // for having been given no prompt at all.
     const args = [
-      "-p",
+      "-p", req.prompt,
       "--output-format", "json",
       "--permission-mode", permissionModeFor(req.autonomy),
       "--append-system-prompt", req.systemPrompt,
@@ -40,7 +44,6 @@ export class ClaudeDriver implements Driver {
     if (req.allowedTools.length) args.push("--allowedTools", ...req.allowedTools);
     if (req.disallowedTools.length) args.push("--disallowedTools", ...req.disallowedTools);
     for (const dir of req.addDirs) args.push("--add-dir", dir);
-    args.push(req.prompt);
     return { args, sessionId };
   }
 
@@ -55,11 +58,32 @@ export class ClaudeDriver implements Driver {
 
     const parsed = parseClaudeResult(proc.stdout, sessionId, model, Date.now() - started);
     if (parsed) return parsed;
-    return failed(
-      `${this.bin} exited ${proc.code} without a parseable result: ${(proc.stderr || proc.stdout).trim().slice(0, 500) || "no output"}`,
-      sessionId, model, Date.now() - started,
-    );
+
+    const output = (proc.stderr || proc.stdout).trim();
+    return {
+      ...failed(
+        `${this.bin} exited ${proc.code} without a parseable result: ${output.slice(0, 500) || "no output"}`,
+        sessionId, model, Date.now() - started,
+      ),
+      sessionLost: isLostSession(output),
+    };
   }
+}
+
+/**
+ * Did the CLI refuse the session we asked it to resume?
+ *
+ * Matched on the CLI's own wording, which is the only signal it gives: the exit
+ * code is a plain 1. Getting this wrong in the safe direction costs one fresh
+ * thread; getting it wrong the other way costs the desk every turn it will ever
+ * take, so the patterns are deliberately about resuming and nothing else.
+ */
+export function isLostSession(output: string): boolean {
+  return [
+    /--resume requires a valid session/i,
+    /no conversation found with session/i,
+    /session id .*(not found|is not a uuid|does not match)/i,
+  ].some((re) => re.test(output));
 }
 
 /** Shape of the JSON the CLI prints under `-p --output-format json`. */

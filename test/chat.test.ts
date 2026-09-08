@@ -146,6 +146,21 @@ describe("the channel", () => {
     assert.deepEqual(spent, ["switchboard", "ada"]);
   });
 
+  test("a session the CLI will not resume is forgotten, not retried forever", async () => {
+    const root = await makeFloor();
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent === "switchboard"
+        ? { text: '```json\n{"reply":["ada"]}\n```' }
+        // What the real CLI does with an id it does not recognise: exit 1, no
+        // parseable result, and the same failure on every turn after it.
+        : { ok: false, text: "", sessionLost: true, error: "--resume requires a valid session ID" },
+    ));
+    await office.saveState({ ...(await office.state("ada")), chatSessionId: "not-a-real-session" });
+
+    await say(office, "@ada you there?");
+    assert.equal((await office.state("ada")).chatSessionId, undefined, "the bad id is dropped");
+  });
+
   test("two desks posting at once both land in the transcript", async () => {
     const office = await Office.open(await makeFloor(), new FakeDriver());
     await Promise.all([

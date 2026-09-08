@@ -5,7 +5,7 @@ import { ClaudeDriver } from "./claude.js";
 import { CodexDriver } from "./codex.js";
 
 export type { Driver, TurnRequest, TurnResult } from "./types.js";
-export { ClaudeDriver, parseClaudeResult, permissionModeFor } from "./claude.js";
+export { ClaudeDriver, parseClaudeResult, permissionModeFor, isLostSession } from "./claude.js";
 export { CodexDriver, parseCodexStream } from "./codex.js";
 
 /** Resolve a tier to a model name, or undefined to take the CLI's default. */
