@@ -96,10 +96,19 @@ main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; 
   color: #0e1116; background: var(--idle); position: relative;
   transition: background .35s, box-shadow .35s;
 }
-.desk[data-status="working"] .avatar { background: var(--working); box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 25%, transparent); }
-.desk[data-status="queued"] .avatar { background: var(--queued); }
-.desk[data-status="blocked"] .avatar { background: var(--blocked); box-shadow: 0 0 0 3px color-mix(in srgb, var(--blocked) 25%, transparent); }
-.desk[data-status="parked"] .avatar { background: var(--parked); }
+.desk[data-status="working"] .avatar { box-shadow: 0 0 0 3px color-mix(in srgb, var(--working) 30%, transparent); }
+.desk[data-status="blocked"] .avatar { box-shadow: 0 0 0 3px color-mix(in srgb, var(--blocked) 30%, transparent); }
+/* Status is a pip, not the whole face. Colouring the avatar by status made
+   every working desk identical and every idle desk grey, which is the one
+   thing a floor of nine people must never look like. */
+.pip {
+  position: absolute; right: -2px; bottom: -2px; width: 10px; height: 10px;
+  border-radius: 50%; background: var(--idle); border: 2px solid var(--desk);
+}
+.desk[data-status="working"] .pip { background: var(--working); }
+.desk[data-status="queued"] .pip { background: var(--queued); }
+.desk[data-status="blocked"] .pip { background: var(--blocked); }
+.desk[data-status="parked"] .pip { background: var(--parked); }
 .desk[data-status="working"] .avatar::after {
   content: ""; position: absolute; inset: -5px; border-radius: 50%;
   border: 1px solid var(--working); animation: ring 1.8s ease-out infinite;
@@ -138,7 +147,8 @@ main { display: grid; grid-template-columns: 1fr 340px; flex: 1; min-height: 0; 
 #chat { flex: 1 1 60%; display: flex; flex-direction: column; min-height: 0; border-top: 1px solid var(--line); }
 #log { flex: 1; overflow-y: auto; padding: 14px 16px; display: flex; flex-direction: column; gap: 12px; }
 .msg { display: flex; gap: 9px; align-items: flex-start; }
-.msg .avatar { width: 26px; height: 26px; font-size: 10px; background: var(--desk-edge); color: var(--text); }
+.msg .avatar { width: 26px; height: 26px; font-size: 10px; color: #0e1116; }
+.msg .who-name { font-weight: 650; }
 .msg.you .avatar { background: var(--accent); color: #0e1116; }
 .msg.system .avatar { background: transparent; border: 1px dashed var(--line); color: var(--faint); }
 .bubble { min-width: 0; max-width: 78ch; }
@@ -261,6 +271,17 @@ function fmt(n) {
   if (n >= 1e3) return Math.round(n / 1e3) + "k";
   return String(Math.round(n));
 }
+/* A desk keeps one colour, in the room and on the floor, derived from its id so
+   it never shifts when someone is hired or let go. Hue only: saturation and
+   lightness are fixed so every face stays legible on both themes. */
+function hueOf(id) {
+  var h = 0;
+  for (var i = 0; i < id.length; i++) h = (h * 31 + id.charCodeAt(i)) % 360;
+  /* Skip the muddy 40-70 band, where names stop being distinguishable. */
+  return h >= 40 && h <= 70 ? h + 40 : h;
+}
+function faceColour(id) { return "hsl(" + hueOf(id) + " 58% 58%)"; }
+
 function initials(name) {
   var p = String(name).trim().split(/\\s+/);
   return ((p[0] || "?")[0] + (p.length > 1 ? p[p.length - 1][0] : "")).toUpperCase();
@@ -341,6 +362,8 @@ function renderDesks() {
     s.textContent = "";
     var row = el("div", "row");
     var av = el("div", "avatar", initials(d.name));
+    av.style.background = faceColour(d.id);
+    av.appendChild(el("div", "pip", ""));
     if (d.unread > 0) av.appendChild(el("div", "badge", String(d.unread)));
     row.appendChild(av);
     var who = el("div", "who");
@@ -569,7 +592,9 @@ function renderChat() {
   S.chat.forEach(function (m) {
     var kind = m.from === "human" ? "you" : m.from === "system" ? "system" : "agent";
     var row = el("div", "msg " + kind);
-    row.appendChild(el("div", "avatar", initials(nameOf(m.from))));
+    var face = el("div", "avatar", initials(nameOf(m.from)));
+    if (m.from !== "human" && m.from !== "office") face.style.background = faceColour(m.from);
+    row.appendChild(face);
     var bubble = el("div", "bubble");
     var meta = el("div", "meta");
     meta.appendChild(el("b", null, nameOf(m.from)));
@@ -700,14 +725,48 @@ document.getElementById("composer").onsubmit = function (e) {
   var settled = "";
   var listening = false;
 
+  /* Spoken punctuation, because the recogniser gives none and a wall of
+     unpunctuated speech is unreadable by the time it reaches a desk. Longest
+     phrases first so "question mark" is not eaten by "mark". */
+  var SPOKEN = [
+    ["question mark", "?"], ["exclamation point", "!"], ["exclamation mark", "!"],
+    ["new paragraph", "\\n\\n"], ["new line", "\\n"], ["open quote", ' "'], ["close quote", '" '],
+    ["full stop", "."], ["period", "."], ["comma", ","], ["colon", ":"], ["semicolon", ";"],
+    ["dash", " - "], ["hyphen", "-"], ["apostrophe", "'"]
+  ];
+
+  function punctuate(text) {
+    var out = text;
+    for (var i = 0; i < SPOKEN.length; i++) {
+      /* Only as a whole word: "period" spoken alone is punctuation, the same
+         letters inside "periodically" are not. */
+      out = out.replace(new RegExp("(^|\\s)" + SPOKEN[i][0] + "(?=\\s|$)", "gi"), SPOKEN[i][1]);
+    }
+    return out
+      .replace(/\s+([.,;:!?])/g, "$1")   /* no space before a mark */
+      .replace(/([.,;:!?])(?=[^\s\\n])/g, "$1 ")
+      .replace(/[ \\t]{2,}/g, " ");
+  }
+
+  /* Capitalise the first word, and anything starting a new sentence. Speech
+     comes back entirely lowercase, which reads as sloppy rather than spoken. */
+  function sentenceCase(text) {
+    return text.replace(/(^\s*|[.!?]\s+|\\n\s*)([a-z])/g, function (all, lead, letter) {
+      return lead + letter.toUpperCase();
+    });
+  }
+
   recogniser.onresult = function (event) {
     var pending = "";
     for (var i = event.resultIndex; i < event.results.length; i++) {
       var text = event.results[i][0].transcript;
-      if (event.results[i].isFinal) settled += text;
+      if (event.results[i].isFinal) settled += text + " ";
       else pending += text;
     }
-    input.value = (settled + pending).replace(/\s+/g, " ").trimStart();
+    var whole = sentenceCase(punctuate(settled + pending)).replace(/^\s+/, "");
+    input.value = whole;
+    /* Keep the tail in view on a long dictation, so you can see it land. */
+    input.scrollLeft = input.scrollWidth;
   };
 
   recogniser.onerror = function (event) {

@@ -15,7 +15,11 @@ const MAX_BODY = 700;
  * "You" means.
  */
 export function speakerName(office: Office, id: string): string {
-  if (id === HUMAN) return "Human";
+  // "Owner", not "Human": on a floor whose admin desk is named after the person
+  // who owns the business -- which is the natural thing to call it -- "Human"
+  // and that desk's name are two labels for someone the model has to keep
+  // apart, and it does not reliably. One of them says what the role is.
+  if (id === HUMAN) return "Owner";
   if (id === SYSTEM) return "office";
   return office.roles.get(id)?.name ?? id;
 }
