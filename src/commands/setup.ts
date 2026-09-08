@@ -60,7 +60,14 @@ export async function init(opts: InitOptions): Promise<string> {
     lines.push(dim("  second pool you are not currently using."));
   }
   lines.push("");
-  lines.push(`${yellow("Next")}: ${dim("office roster")}, then ${dim('office brief "<what you want done>"')}`);
+  // Chat first, briefs second: talking to the floor costs one cheap turn and
+  // tells you whether these desks understand your repo at all. A brief commits
+  // the whole queue to that answer before you have any reason to trust it.
+  lines.push(
+    `${yellow("Next")}: ${dim('office chat "<anything>"')} to talk to the floor, ` +
+    `${dim("office serve")} for the room in a browser,\n` +
+    `      or ${dim('office brief "<what you want done>"')} once you want work queued.`,
+  );
   return lines.join("\n");
 }
 
