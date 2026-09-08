@@ -53,8 +53,10 @@ export const NO_WRITES = ["Write", "Edit", "NotebookEdit", "Bash"];
 /** More than this and the "everyone answers everything" problem is back. */
 const MAX_RECIPIENTS = 3;
 
-/** Volunteers are a flourish, and a flourish with a per-turn price. */
-const MAX_VOLUNTEERS = 2;
+/** Volunteers cost a turn each, but a room where only one desk ever
+ *  answers is a queue with avatars. Three is the most that reads as a
+ *  conversation rather than a pile-on. */
+const MAX_VOLUNTEERS = 3;
 
 /** One message should not be able to commit the floor to a week of work. */
 const MAX_ASSIGNMENTS = 4;
@@ -133,21 +135,24 @@ export function parseRouting(raw: string, known: string[]): Routing | null {
  * "given what they just said, who does what" -- has nowhere to live without a
  * second look. This is that look: no recipients, because the talking is done.
  */
-export function parseFollowUp(raw: string, known: string[]): { assignments: Assignment[]; say?: string } {
+export function parseFollowUp(raw: string, known: string[]): { assignments: Assignment[]; say?: string; record: string[] } {
   const fenced = /```(?:json)?\s*([\s\S]*?)```/.exec(raw);
   const candidate = (fenced?.[1] ?? raw).trim();
   const start = candidate.indexOf("{");
   const end = candidate.lastIndexOf("}");
-  if (start === -1 || end <= start) return { assignments: [] };
+  if (start === -1 || end <= start) return { assignments: [], record: [] };
 
-  let parsed: { assign?: unknown; say?: unknown };
+  let parsed: { assign?: unknown; say?: unknown; record?: unknown };
   try {
     parsed = JSON.parse(candidate.slice(start, end + 1)) as typeof parsed;
   } catch {
-    return { assignments: [] };
+    return { assignments: [], record: [] };
   }
   const say = typeof parsed.say === "string" && parsed.say.trim() ? parsed.say.trim() : undefined;
-  return { assignments: assignmentsIn(parsed.assign, known), ...(say ? { say } : {}) };
+  const record = Array.isArray(parsed.record)
+    ? parsed.record.filter((f): f is string => typeof f === "string" && f.trim().length > 0).map((f) => f.trim()).slice(0, 4)
+    : [];
+  return { assignments: assignmentsIn(parsed.assign, known), record, ...(say ? { say } : {}) };
 }
 
 export function followUpPrompt(office: Office, history: ChatMessage[]): string {
@@ -187,6 +192,18 @@ export function followUpPrompt(office: Office, history: ChatMessage[]): string {
     "goes. Assign what this exchange established and nothing more; each one costs",
     "a full turn and does real work.",
     "",
+    "## Writing it down",
+    "",
+    "When the owner states a fact about the business -- a price, an hour, a",
+    "constraint, a decision, something he owns or cannot do -- put it in",
+    "\"record\" and it is appended to business.md. That file is what every desk",
+    "reads before answering, so a fact that is not in it gets asked for again",
+    "next week.",
+    "",
+    "Record only what the owner himself said, in his terms, as one flat sentence",
+    "each. Not a desk's opinion, not your inference, not anything already in the",
+    "file. Most exchanges record nothing.",
+    "",
     "Assign nothing when nothing was established: an opinion, a question already",
     "answered, small talk. An empty list is the common case and costs nothing.",
     "",
@@ -199,7 +216,7 @@ export function followUpPrompt(office: Office, history: ChatMessage[]): string {
     "One fenced ```json block and nothing else:",
     "",
     "```json",
-    '{"assign":[{"to":"agent-id","task":"one standalone instruction"}],"say":"optional line, only if it changes what happens"}',
+    '{"assign":[{"to":"agent-id","task":"one standalone instruction"}],"record":["a fact the owner stated"],"say":"optional line, only if it changes what happens"}',
     "```",
   ].join("\n");
 }

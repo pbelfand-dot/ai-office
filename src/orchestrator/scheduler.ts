@@ -277,6 +277,11 @@ export class Scheduler {
       `the only channel that reaches them; anything else goes nowhere.\n\n` +
       `When this task is finished, run:\n\n` +
       `    office done "<one sentence on what you changed and why>"\n\n` +
+      `That sentence is posted in the office chat under your name, so write it ` +
+      `the way you would say it to a colleague, not the way you would write a ` +
+      `commit message. "Wrote the target list -- only listings within a 20 ` +
+      `minute walk of a station" reads like a person. "Established process with ` +
+      `mandatory verification requirements" does not.\n\n` +
       `If that command is unavailable to you, end your reply with a line reading ` +
       `${DONE_LINE} followed by the same sentence. Finishing the work and not ` +
       `saying so is the one failure that costs the most: the office cannot see ` +

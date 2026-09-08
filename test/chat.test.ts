@@ -1,13 +1,13 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, writeFile, mkdir, readFile } from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { Office } from "../src/office.js";
-import { say } from "../src/chat/session.js";
+import { say, takeMemory } from "../src/chat/session.js";
 import { serve } from "../src/server/serve.js";
 import { mentionsIn, parseRouting } from "../src/chat/router.js";
 import { FakeDriver, type TurnRequest } from "../src/runner/driver.js";
@@ -418,5 +418,52 @@ describe("the queue works itself", () => {
     const { worked } = await say(office, "please get someone started on the endless thing");
     assert.equal(worked?.turns, 2, "stopped at the ceiling");
     assert.equal((await office.tasks())[0]?.state, "assigned", "and left it on the queue");
+  });
+});
+
+describe("the floor learns things", () => {
+  test("a desk's note to itself is stored and never posted", async () => {
+    const root = await makeFloor();
+    const office = await Office.open(root, new FakeDriver((req) =>
+      req.agent === "switchboard"
+        ? { text: '{"reply":["ada"],"why":"hers"}' }
+        : { text: "Saturday works, Thursday doesn't.\n\nREMEMBER: Paul cannot shoot on school nights" }));
+
+    const { replies } = await say(office, "which days can we shoot?");
+    assert.equal(replies[0]?.body, "Saturday works, Thursday doesn't.", "the note is stripped");
+
+    const journal = await office.memory.journal("ada");
+    assert.match(JSON.stringify(journal), /school nights/, "and kept");
+  });
+
+  test("a message that is only a note says nothing at all", () => {
+    assert.deepEqual(takeMemory("REMEMBER: just this"), { spoken: "", learned: ["just this"] });
+    assert.deepEqual(takeMemory("nothing to note here"), { spoken: "nothing to note here", learned: [] });
+    // Talking about remembering is not a note, or every mention becomes one.
+    assert.deepEqual(takeMemory("I'll remember: the price").learned, []);
+  });
+
+  test("what the owner says is written into the brief, once", async () => {
+    const root = await makeFloor();
+    await writeFile(join(root, "business.md"), "# The business\n\nWhat we do.\n", "utf8");
+    await saveConfig(join(root, "office.config.json"), {
+      ...defaultConfig("max5x"), driver: "fake", orchestrator: "michelle", router: "paul", brief: "business.md",
+      chat: { ...defaultConfig("max5x").chat, autoRun: 0 },
+    });
+    await writeFile(join(root, "office", "agents", "paul.md"), "---\nname: Paul\ntitle: Admin\ntier: large\nautonomy: trusted\n---\n\nYou run it.\n", "utf8");
+
+    const driver = new FakeDriver((req) =>
+      req.agent !== "paul" ? { text: "Noted." }
+        : req.prompt.includes("Your call")
+          ? { text: '{"assign":[],"record":["Paul shoots weekends","Paul shoots weekends"]}' }
+          : { text: '{"reply":["ada"],"why":"hers"}' });
+
+    const office = await Office.open(root, driver);
+    await say(office, "I can shoot weekends now");
+
+    const brief = await readFile(join(root, "business.md"), "utf8");
+    assert.match(brief, /Recorded from the room/);
+    assert.equal(brief.match(/Paul shoots weekends/g)?.length, 1, "the same fact twice is still one fact");
+    assert.match(brief, /What we do\./, "and what the owner wrote is untouched");
   });
 });

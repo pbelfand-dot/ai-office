@@ -70,6 +70,18 @@ export async function say(office: Office, body: string, opts: { channel?: string
   if (closing.say && closing.say !== routing.say) replies.push(await office.chat.post({ channel, from: office.config.router, body: closing.say, replyTo: posted.id }));
   queued.push(...(await assign(office, closing.assignments, channel, posted)));
 
+  // What the owner said goes into the file the floor reads, or it is forgotten
+  // as soon as the transcript rolls past it and asked for again next week.
+  const recorded = await office.recordToBrief(closing.record);
+  if (recorded.length) {
+    replies.push(await office.chat.post({
+      channel,
+      from: SYSTEM,
+      body: `Written into ${office.config.brief}: ${recorded.join("; ")}`,
+      replyTo: posted.id,
+    }));
+  }
+
   // Results go into the replies, not just into the channel file: a terminal
   // that prints the assignment and swallows the outcome is how "it did nothing"
   // survives the floor having done the thing.
@@ -113,11 +125,11 @@ async function work(office: Office, channel: string, prompt: ChatMessage): Promi
 }
 
 /** A second look from a visible boss, once the room has answered. */
-async function followUp(office: Office, channel: string, prompt: ChatMessage, roomSpoke: boolean): Promise<{ assignments: Assignment[]; say?: string }> {
+async function followUp(office: Office, channel: string, prompt: ChatMessage, roomSpoke: boolean): Promise<{ assignments: Assignment[]; say?: string; record: string[] }> {
   const routerId = office.config.router;
   // A hidden switchboard is a classifier and has no standing to hand out work,
   // and there is nothing to follow up on when nobody said anything.
-  if (!roomSpoke || !office.roles.has(routerId) || office.role(routerId).hidden) return { assignments: [] };
+  if (!roomSpoke || !office.roles.has(routerId) || office.role(routerId).hidden) return { assignments: [], record: [] };
 
   const history = await office.chat.history(channel, office.config.chat.historyDepth);
   const known = office.agentIds().filter((id) => id !== routerId);
@@ -132,13 +144,13 @@ async function followUp(office: Office, channel: string, prompt: ChatMessage, ro
       timeoutMs: office.config.chat.turnTimeoutMs,
     });
   } catch {
-    return { assignments: [] };
+    return { assignments: [], record: [] };
   }
 
   // Nothing assigned is the common outcome, so every failure here is silent:
   // the room already answered, and an error about the boss's second thoughts
   // helps nobody.
-  if (!outcome.ran || !outcome.result?.ok) return { assignments: [] };
+  if (!outcome.ran || !outcome.result?.ok) return { assignments: [], record: [] };
   return parseFollowUp(outcome.result.text, known);
 }
 
@@ -224,7 +236,38 @@ async function replyFrom(office: Office, agentId: string, channel: string, promp
     return excuse(outcome.blockedBy ?? outcome.result?.error ?? "the turn produced no reply");
   }
   if (opts.mayPass && (text === PASS || text.replace(/[.\s]/g, "").toUpperCase() === PASS)) return null;
-  return office.chat.post({ channel, from: agentId, body: text, replyTo: prompt.id });
+
+  // A desk reads its memory every turn and, in the room, could never write to
+  // it: `office remember` needs a shell and chat turns have none. So the floor
+  // learned nothing from talking, which is where most of what it needs to know
+  // actually gets said.
+  const { spoken, learned } = takeMemory(text);
+  for (const fact of learned) await office.memory.remember(agentId, fact, "chat");
+  if (!spoken) return null;
+
+  return office.chat.post({ channel, from: agentId, body: spoken, replyTo: prompt.id });
+}
+
+/**
+ * Pull the desk's notes-to-self out of what it said.
+ *
+ * On its own line so it can be lifted cleanly, and never posted: a colleague
+ * who ends every message reciting what they will remember is insufferable, and
+ * the room is not where the note is useful anyway.
+ */
+export function takeMemory(text: string): { spoken: string; learned: string[] } {
+  const learned: string[] = [];
+  const spoken = text
+    .split("\n")
+    .filter((line) => {
+      const fact = /^\s*[*_`]*\s*REMEMBER:\s*(.+)$/i.exec(line)?.[1]?.trim();
+      if (!fact) return true;
+      learned.push(fact.replace(/[*_`]+$/, "").trim());
+      return false;
+    })
+    .join("\n")
+    .trim();
+  return { spoken, learned };
 }
 
 function replyPrompt(office: Office, history: ChatMessage[], mayPass: boolean): string {
@@ -269,6 +312,31 @@ function replyPrompt(office: Office, history: ChatMessage[], mayPass: boolean): 
     "- If you don't know, say you don't know and who would.",
     "",
     "Write only the message. No name prefix, no quotes around it, nothing else.",
+    "",
+    "### What that sounds like",
+    "",
+    "Bad, and the way an assistant writes:",
+    "  \"Great question! Based on the constraints in business.md, I'd suggest we",
+    "  consider a few options here. First, we could look at whether the timing",
+    "  works — let me know if you'd like me to dig deeper into any of these!\"",
+    "",
+    "Good, and the way a colleague writes:",
+    "  \"Saturday works, Thursday doesn't — I'd be editing on a school night.\"",
+    "  \"That's Victor's, not mine.\"",
+    "  \"Yeah, agreed.\"",
+    "  \"How far is it? If it's not walkable I can't take it.\"",
+    "",
+    "## Remembering something",
+    "",
+    "If this conversation taught you something you will need weeks from now --",
+    "a decision made, a price agreed, what a client wants, something that did",
+    "not work -- end your message with a separate line:",
+    "",
+    "  REMEMBER: the fact, in one sentence",
+    "",
+    "It is stripped before anyone sees it, so write the note for yourself, not",
+    "for the room. Most messages need none. Do not note what is already written",
+    "in business.md, and never note the fact that you were asked something.",
     ...(mayPass
       ? [
           "",

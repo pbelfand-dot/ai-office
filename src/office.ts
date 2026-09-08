@@ -143,6 +143,47 @@ export class Office {
     }
   }
 
+  /**
+   * Append what the owner just told the room to the file the floor reads.
+   *
+   * Otherwise every fact said in chat is lost the moment the transcript rolls
+   * past it, and the desks ask again next week. Appended under a heading of
+   * their own and never woven into what the owner wrote: this file is his, and
+   * a tool that edits your words in place is one you stop trusting to hold
+   * them. Deduped, because the same fact said twice is still one fact.
+   */
+  async recordToBrief(facts: string[]): Promise<string[]> {
+    const name = this.config.brief;
+    if (!name || facts.length === 0) return [];
+
+    const path = resolve(this.root, this.config.repo, name);
+    const current = await readFile(path, "utf8").catch(() => null);
+    if (current === null) return [];
+
+    // Deduped against the file and against the rest of this batch: a model
+    // asked for facts will happily list the same one twice.
+    const seen = new Set([current.toLowerCase()]);
+    const fresh: string[] = [];
+    for (const raw of facts) {
+      const fact = raw.trim();
+      if (!fact) continue;
+      const key = fact.toLowerCase();
+      if (current.toLowerCase().includes(key) || seen.has(key)) continue;
+      seen.add(key);
+      fresh.push(fact);
+    }
+    if (fresh.length === 0) return [];
+
+    const heading = "## Recorded from the room";
+    const lines = fresh.map((f) => `- ${f} _(${new Date().toISOString().slice(0, 10)})_`).join("\n");
+    const next = current.includes(heading)
+      ? current.replace(heading, `${heading}\n\n${lines}`)
+      : `${current.replace(/\s*$/, "")}\n\n${heading}\n\nFacts the floor was told and wrote down. Move them into the sections above\nwhen you get a chance -- they count either way.\n\n${lines}\n`;
+
+    await writeFile(path, next, "utf8");
+    return fresh;
+  }
+
   async briefs(): Promise<Brief[]> {
     return readJson<Brief[]>(this.paths.briefs, []);
   }
