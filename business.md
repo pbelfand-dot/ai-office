@@ -35,9 +35,10 @@ cover the parts he does not want to do — the scheduling, the emailing, the
 chasing, the promoting — so that his time goes into the camera and the edit and
 not into admin.
 
-Paul is also the admin: he reads every message, decides who acts, and speaks
-when there is a decision to make. He does not need updates, he needs the work
-handled.
+**Gus** is the admin desk: he reads every message, decides who acts, and speaks
+when there is a decision to make. He runs the floor on Paul's behalf. Paul is
+the owner and is not a desk -- when something is his call, ask him directly.
+He does not need updates, he needs the work handled.
 
 | Desk | Owns | Writes to |
 |---|---|---|
@@ -164,8 +165,10 @@ the real limit on how many jobs exist:
 - **Thursday and Friday, from about 1:40pm, and he must be finished and away
   by 7:30pm.** That is the reliable window.
 - School days otherwise: assume no.
-- Weekends: not stated. Dana should ask before assuming either way — it is
-  probably the largest untapped block of shooting time in the week.
+- **Weekends are open.** This is the biggest block of shooting time in the week
+  and the calendar is built around it first — Thursday and Friday are the
+  extra, not the core. It also matters for who we chase: open houses are on
+  weekends, and that is a room full of agents who cannot leave.
 
 Two things follow from that window and every desk should act on them:
 

@@ -500,3 +500,23 @@ test("the business brief reaches the desks before it reaches git", async () => {
   const seen = await readFile(join(office.paths.worktree("ada"), "business.md"), "utf8");
   assert.match(seen, /No car/, "the desk can read what was never committed");
 });
+
+test("a desk the tool stops shipping is let go, unless you edited it", async () => {
+  const root = await makeRepo();
+  const opts = { root, plan: "max5x" as const, codexPlan: "none" as const, force: true, seed: true, floor: "photography" };
+  await init(opts);
+
+  // Stand in for a rename: a desk we seeded last time and no longer ship.
+  const seeded = join(root, "office", "agents", "retired.md");
+  await writeFile(seeded, "---\nname: Retired\nautonomy: trusted\n---\n\nOld desk.\n", "utf8");
+  const config = JSON.parse(await readFile(join(root, "office.config.json"), "utf8"));
+  const { createHash } = await import("node:crypto");
+  config.seeded.retired = createHash("sha256").update(await readFile(seeded, "utf8")).digest("hex").slice(0, 16);
+  config.seeded.mine = "0000000000000000";
+  await writeFile(join(root, "office.config.json"), JSON.stringify(config), "utf8");
+  await writeFile(join(root, "office", "agents", "mine.md"), "---\nname: Mine\nautonomy: trusted\n---\n\nI wrote this.\n", "utf8");
+
+  await init(opts);
+  assert.equal(await readFile(seeded, "utf8").then(() => true, () => false), false, "untouched, so retired");
+  assert.match(await readFile(join(root, "office", "agents", "mine.md"), "utf8"), /I wrote this/, "edited, so kept");
+});

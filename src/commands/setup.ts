@@ -1,7 +1,9 @@
 import { mkdir, writeFile, access, readFile, rm } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { Paths } from "../paths.js";
 import { defaultConfig, saveConfig, type CodexPlan, type Plan } from "../config.js";
+import { readJson } from "../util.js";
 import { floors } from "../agents/floors.js";
 import { bold, dim, green, yellow } from "./format.js";
 
@@ -29,7 +31,18 @@ export async function init(opts: InitOptions): Promise<string> {
     throw new Error(`no floor called "${opts.floor}". Available: ${Object.keys(available).join(", ")}`);
   }
 
-  const config = { ...defaultConfig(opts.plan, opts.codexPlan), router: floor.router, orchestrator: floor.orchestrator, brief: floor.brief?.path ?? "" };
+  // Read before overwriting: what the previous run seeded is the only record of
+  // which desks are ours to retire.
+  const previous = (await readJson<{ seeded?: Record<string, string> }>(paths.config, {})).seeded ?? {};
+  const seeded: Record<string, string> = {};
+
+  const config = {
+    ...defaultConfig(opts.plan, opts.codexPlan),
+    router: floor.router,
+    orchestrator: floor.orchestrator,
+    brief: floor.brief?.path ?? "",
+    seeded,
+  };
   await saveConfig(paths.config, config);
   await paths.ensureOffice();
   await mkdir(paths.rolesDir, { recursive: true });
@@ -43,11 +56,29 @@ export async function init(opts: InitOptions): Promise<string> {
         continue;
       }
       await writeFile(path, source, "utf8");
+      seeded[id] = digest(source);
       const title = /^title:\s*(.+)$/m.exec(source)?.[1]?.trim() ?? "Staff";
       const note = /^hidden:\s*true$/m.test(source)
         ? "hidden: routes the chat, never in it"
         : id === floor.router ? `${title} -- reads everything, decides who acts` : title;
       lines.push(`${green("hired")}   ${id} ${dim(note)}`);
+    }
+  }
+
+  // A desk this tool seeded and no longer ships -- renamed, dropped, moved to
+  // another floor -- would otherwise sit there forever, answering and billing.
+  // Removed only when it still hashes to what we wrote: an edited desk is
+  // yours, whatever we called it last time.
+  for (const [id, hash] of Object.entries(previous)) {
+    if (floor.roles[id]) continue;
+    const path = join(paths.rolesDir, `${id}.md`);
+    const current = await read(path);
+    if (current === null) continue;
+    if (digest(current) === hash) {
+      await rm(path);
+      lines.push(`${dim("let go")}  ${id} ${dim("(no longer on this floor)")}`);
+    } else {
+      lines.push(`${yellow("kept")}    ${id} ${dim("-- you edited this desk, so it stays. Delete it yourself if it should go.")}`);
     }
   }
 
@@ -162,6 +193,8 @@ export async function hire(root: string, id: string, opts: { title?: string; tie
       : yellow(`  Starts at autonomy "${autonomy}". You are trusting an agent you have not watched work yet.`),
   ].join("\n");
 }
+
+const digest = (text: string): string => createHash("sha256").update(text).digest("hex").slice(0, 16);
 
 async function read(path: string): Promise<string | null> {
   try { return await readFile(path, "utf8"); } catch { return null; }

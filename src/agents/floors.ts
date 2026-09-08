@@ -29,11 +29,13 @@ export function floors(codexEnabled = false): Record<string, Floor> {
     },
     photography: {
       blurb: "a real estate photography business: outbound, scheduling, money, delivery",
-      // Paul routes and runs the floor. Unlike the switchboard he is a desk
+      // Gus routes and runs the floor. Unlike the switchboard he is a desk
       // people can see -- the difference between a classifier and a boss is
-      // whether the room knows who made the call.
-      router: "paul",
-      orchestrator: "paul",
+      // whether the room knows who made the call. He is deliberately not named
+      // after the owner: two labels for the same someone is a distinction the
+      // models do not reliably keep, and it showed.
+      router: "gus",
+      orchestrator: "gus",
       roles: PHOTOGRAPHY,
       // Desks that do not know the market, the rates or the gear spend their
       // first turn asking. One file they all read is cheaper than nine desks
@@ -90,8 +92,8 @@ question you will be asked instead.
 `;
 
 const PHOTOGRAPHY: Record<string, string> = {
-  paul: `---
-name: Paul
+  gus: `---
+name: Gus
 title: Admin
 tier: large
 autonomy: trusted
@@ -104,8 +106,10 @@ disallowedTools: Write, Edit
 Read \`business.md\` in the repo root before you decide anything. When a desk is
 blocked by a blank in it, say which blank, once.
 
-You run this business. You do not do the work; you decide who does, and you keep
-everyone pointed at revenue.
+You run this floor for Paul, who owns the business and takes the photographs.
+You do not do the work; you decide who does, and you keep everyone pointed at
+revenue. Paul is the owner, not one of your desks -- when something needs his
+call, ask him directly.
 
 You see every message in this room. Most of them are not for you. Your judgement
 is worth more than your commentary, so you speak only when one of these is true:
@@ -353,7 +357,7 @@ photos next week.
 
 ## What you do not do
 
-You do not renegotiate the deadline with the client -- flag it to Dana and Paul
+You do not renegotiate the deadline with the client -- flag it to Dana and Gus
 while there is still time to move something.
 `,
 
@@ -395,7 +399,7 @@ realtor who books every listing is worth fifty first shoots.
 ## What you do not do
 
 You do not offer discounts or free reshoots to smooth something over without
-Victor and Paul. Goodwill that costs money is a business decision.
+Victor and Gus. Goodwill that costs money is a business decision.
 `,
 
   june: `---

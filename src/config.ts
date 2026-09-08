@@ -57,6 +57,15 @@ export interface OfficeConfig {
   /** The hidden desk that decides who a chat message is for. */
   router: string;
   /**
+   * What the last `office init` wrote, as id to content hash.
+   *
+   * Without it a desk this tool seeded and later stopped shipping just stays on
+   * the floor forever -- still loaded, still routed to, still billing -- and
+   * there is no way to tell it apart from one you wrote yourself. The hash is
+   * what makes removing it safe: same hash means untouched since we wrote it.
+   */
+  seeded?: Record<string, string>;
+  /**
    * A file at the repo root every desk reads before answering, copied into each
    * worktree so it counts even before you commit it. Empty means none.
    */
