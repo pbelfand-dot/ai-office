@@ -102,9 +102,23 @@ Paul has not set one, and should not guess. What constrains it here: he edits
 every image himself, around school. So the honest promise is built from when he
 can actually sit down and edit, not from what sounds competitive.
 
-- Turnaround Paul promises: **BLANK — Kaya to propose one Paul can always hit,
-  based on the hours below, then Paul confirms it.** Until then, no desk states
-  a delivery time to a client.
+- **Turnaround promised: 48 hours from the shoot.** This is the number desks
+  may state to a client. Set deliberately below what Paul can usually do:
+  a weekend shoot is normally edited the next day, so most jobs land inside 24
+  hours and beat the promise. That gap is the point — an agent whose listing
+  goes live does not forgive a missed delivery, and "always early" is worth
+  more than "sometimes faster".
+
+  How it falls out of the working week: shot Saturday, delivered by Monday;
+  shot Thursday afternoon, delivered by Saturday. Neither requires Paul to
+  edit on a school night to keep his word.
+
+  **Not yet measured.** Nobody has timed a real edit of 10-20 images, and that
+  single number decides whether this is conservative or tight. Kaya times the
+  first three shoots. If the edit is consistently under about 90 minutes, the
+  promise drops to 24 hours and Victor prices next-day as the premium it is.
+  If it runs long, the promise stays at 48 and the shoot count per day comes
+  down instead.
 - **Photo count: 10 to 20 delivered images per shoot.** House-size limit not
   set — a large house still has to fit that count, so Victor should price
   above a certain size separately rather than absorbing it.
